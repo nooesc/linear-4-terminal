@@ -1,18 +1,31 @@
-# Linear CLI Tool
+# Linear CLI - Command Line Interface for Linear.app
 
-A comprehensive command-line interface for Linear's project management API, built in Rust. This tool allows you to interact with Linear from your terminal, manage issues, projects, teams, and more.
+A fast, powerful terminal client for Linear project management. Access Linear's GraphQL API directly from your command line to manage issues, projects, and teams without leaving your terminal. Built with Rust for speed and reliability.
+
+**Perfect for developers who want to:**
+- Create and update Linear issues without switching to a browser
+- Automate Linear workflows with scripts  
+- Perform bulk operations on issues and projects
+- Stay in the terminal while managing project tasks
 
 ![Linear CLI Demo](assets/linear-cli-demo.png)
 
-## Features
+## Why Use Linear CLI?
 
-✅ **Authentication**: Support for API keys and secure configuration  
-✅ **Issue Management**: Create, list, filter, and search issues  
-✅ **Project Management**: Create and list projects  
-✅ **Team Management**: List teams and their information  
-✅ **Advanced Filtering**: Filter by status, assignee, team, priority  
-✅ **Multiple Output Formats**: Simple, table, and JSON output  
-✅ **Real-time Data**: Direct integration with Linear's GraphQL API  
+- **Speed**: No browser needed - manage Linear issues at terminal speed
+- **Automation**: Script your workflows and integrate with other tools
+- **Focus**: Stay in your development environment without context switching
+- **Power**: Bulk operations and advanced filtering not available in the web UI
+
+## Key Features
+
+✅ **Full Linear API Access**: Create, read, update, and delete issues and projects  
+✅ **Smart Filtering**: Filter by status, assignee, team, priority, or search text  
+✅ **Beautiful Output**: Color-coded terminal display with status grouping  
+✅ **Multiple Formats**: Export to JSON, table view, or simple text  
+✅ **Secure Authentication**: API key management with environment variables  
+✅ **Cross-platform**: Works on macOS, Linux, and Windows (WSL)  
+✅ **Blazing Fast**: Built with Rust for instant response times  
 
 ## Installation
 
@@ -68,7 +81,22 @@ linear whoami
 linear auth --show
 ```
 
-## Usage
+## Quick Start - Linear Terminal Commands
+
+Get started in 30 seconds:
+
+```bash
+# 1. Install
+curl -sSL https://raw.githubusercontent.com/coderafiz/linear-4-terminal/main/install.sh | bash
+
+# 2. Authenticate with your Linear API key
+linear auth --api-key YOUR_LINEAR_API_KEY
+
+# 3. Start using Linear from your terminal!
+linear issues --mine
+```
+
+## Usage - Complete Linear CLI Reference
 
 ### Authentication Commands
 
@@ -228,7 +256,7 @@ linear issues --format json
 
 ## Examples
 
-### Daily Workflow Examples
+### Common Linear Terminal Workflows
 
 ```bash
 # Check your assigned issues
@@ -401,18 +429,27 @@ For debugging, you can inspect the API calls by modifying the code to add debug 
 
 ## Contributing
 
-This is a comprehensive CLI tool that can be easily extended. Some areas for improvement:
+Contributions are welcome! This Linear terminal client can be extended with:
 
-- [ ] Add comment management
-- [ ] Add label management
-- [ ] Add more sophisticated filtering
-- [ ] Add configuration for default values
-- [ ] Add shell completion scripts
-- [ ] Add more output formatting options
-- [ ] Add pagination support for large result sets
-- [ ] Add batch operations for multiple items
-- [ ] Add interactive mode for guided operations
+- Comment management for Linear issues
+- Label and milestone management  
+- Advanced search queries
+- Shell completion scripts
+- Batch operations for multiple issues
+- Interactive mode for guided workflows
+
+See [issues](https://github.com/colerafiz/linear-4-terminal/issues) for planned features.
+
+## Related Projects and Alternatives
+
+- **Linear Web App**: The official Linear.app web interface
+- **Linear API**: Direct GraphQL API access for custom integrations
+- **Linear CLI**: This terminal-based Linear client for developers
+
+## Keywords for Search
+
+Linear CLI, Linear terminal, Linear command line, Linear.app CLI, Linear API client, terminal Linear app, command line project management, Linear issue tracker terminal, Linear GraphQL client, Rust Linear integration
 
 ## License
 
-MIT License - feel free to modify and distribute.
+MIT License - free to use and modify for your Linear workflow automation needs.
