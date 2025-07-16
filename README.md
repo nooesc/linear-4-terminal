@@ -14,33 +14,33 @@ A comprehensive command-line interface for Linear's project management API, buil
 
 ## Installation
 
-### Prerequisites
-- Rust and Cargo installed ([Install Rust](https://rustup.rs/))
-- Linear API key ([Get your API key](https://linear.app/settings/api))
+### macOS/Linux via Direct Download (Recommended)
+```bash
+curl -sSL https://raw.githubusercontent.com/colerafiz/linear-4-terminal/main/install.sh | bash
+```
 
 ### Build from Source
-
-1. **Clone or create the project:**
 ```bash
-mkdir linear-cli && cd linear-cli
-# Copy the main.rs content to src/main.rs
-# Copy the Cargo.toml content to Cargo.toml
-```
+# Install from GitHub
+cargo install --git https://github.com/colerafiz/linear-4-terminal
 
-2. **Build the project:**
-```bash
-cargo build --release
-```
-
-3. **Install globally (optional):**
-```bash
+# Or clone and build locally
+git clone https://github.com/colerafiz/linear-4-terminal
+cd linear-4-terminal
 cargo install --path .
 ```
 
-Or copy the binary to your PATH:
+### Homebrew (Coming Soon)
 ```bash
-cp target/release/linear-cli /usr/local/bin/linear
+# Once the tap is set up:
+brew tap colerafiz/tap
+brew install linear-cli
 ```
+
+### Prerequisites
+- For direct download: No prerequisites needed
+- For building from source: Rust and Cargo ([Install Rust](https://rustup.rs/))
+- Linear API key ([Get your API key](https://linear.app/settings/api))
 
 ## Configuration
 
