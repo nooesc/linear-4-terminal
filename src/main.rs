@@ -945,6 +945,159 @@ fn truncate(s: &str, max_len: usize) -> String {
     }
 }
 
+fn print_formatted_markdown(text: &str) {
+    let mut in_code_block = false;
+    let mut code_block_content = Vec::new();
+    let mut consecutive_empty_lines = 0;
+    
+    for line in text.lines() {
+        let trimmed = line.trim();
+        
+        // Handle empty lines
+        if trimmed.is_empty() {
+            consecutive_empty_lines += 1;
+            if consecutive_empty_lines <= 1 && !in_code_block {
+                println!();
+            }
+            continue;
+        } else {
+            consecutive_empty_lines = 0;
+        }
+        
+        // Handle code blocks
+        if trimmed.starts_with("```") {
+            if in_code_block {
+                // End of code block - print it
+                println!("{}", "┌─ Code ─────────────────────────────────────────────────────────────┐".bright_black());
+                for code_line in &code_block_content {
+                    println!("{} {} {}", "│".bright_black(), format!("{:<68}", code_line).on_bright_black().black(), "│".bright_black());
+                }
+                println!("{}", "└────────────────────────────────────────────────────────────────────┘".bright_black());
+                code_block_content.clear();
+                in_code_block = false;
+            } else {
+                // Start of code block
+                in_code_block = true;
+            }
+            continue;
+        }
+        
+        if in_code_block {
+            code_block_content.push(line.to_string());
+            continue;
+        }
+        
+        // Handle headers
+        if trimmed.starts_with("###") {
+            let header = trimmed.trim_start_matches('#').trim();
+            println!("\n  {}", header.yellow());
+            println!("  {}", "─".repeat(header.len()).yellow());
+        } else if trimmed.starts_with("##") {
+            let header = trimmed.trim_start_matches('#').trim();
+            println!("\n{}", header.bright_yellow().bold());
+            println!("{}", "─".repeat(header.len()).bright_yellow());
+        } else if trimmed.starts_with("#") {
+            let header = trimmed.trim_start_matches('#').trim();
+            println!("\n{}", header.bright_cyan().bold());
+            println!("{}", "═".repeat(header.len()).bright_cyan());
+        } 
+        // Handle bullet points
+        else if trimmed.starts_with("* ") || trimmed.starts_with("- ") {
+            let content = trimmed.trim_start_matches(['*', '-', ' ']);
+            let formatted = format_inline_markdown(content);
+            println!("  {} {}", "•".bright_green(), formatted);
+        }
+        // Handle numbered lists
+        else if trimmed.chars().next().map_or(false, |c| c.is_numeric()) && 
+                (trimmed.starts_with("1.") || trimmed.starts_with("2.") || trimmed.starts_with("3.") || 
+                 trimmed.starts_with("4.") || trimmed.starts_with("5.") || trimmed.starts_with("6.")) {
+            let parts: Vec<&str> = trimmed.splitn(2, '.').collect();
+            if parts.len() == 2 {
+                let num = parts[0];
+                let content = parts[1].trim();
+                let formatted = format_inline_markdown(content);
+                println!("  {}. {}", num.bright_cyan(), formatted);
+            }
+        }
+        // Handle indented content (like sub-bullets)
+        else if line.starts_with("   ") {
+            let formatted = format_inline_markdown(trimmed);
+            println!("     {} {}", "◦".bright_black(), formatted);
+        }
+        // Handle checkboxes
+        else if trimmed.starts_with("- [ ]") || trimmed.starts_with("- [x]") || trimmed.starts_with("- [X]") {
+            let checked = trimmed.contains("[x]") || trimmed.contains("[X]");
+            let content = trimmed.trim_start_matches("- [ ]").trim_start_matches("- [x]").trim_start_matches("- [X]").trim();
+            let checkbox = if checked { "☑".green() } else { "☐".bright_black() };
+            let formatted = format_inline_markdown(content);
+            println!("  {} {}", checkbox, formatted);
+        }
+        // Regular paragraph
+        else {
+            let formatted = format_inline_markdown(trimmed);
+            println!("{}", formatted);
+        }
+    }
+    
+    // Handle any remaining code block content
+    if in_code_block && !code_block_content.is_empty() {
+        println!("{}", "┌─ Code ─────────────────────────────────────────────────────────────┐".bright_black());
+        for code_line in &code_block_content {
+            println!("{} {} {}", "│".bright_black(), format!("{:<68}", code_line).on_bright_black().black(), "│".bright_black());
+        }
+        println!("{}", "└────────────────────────────────────────────────────────────────────┘".bright_black());
+    }
+}
+
+fn format_inline_markdown(text: &str) -> String {
+    let mut result = text.to_string();
+    
+    // Handle bold text
+    while let Some(start) = result.find("**") {
+        if let Some(end) = result[start + 2..].find("**") {
+            let before = &result[..start];
+            let bold_text = &result[start + 2..start + 2 + end];
+            let after = &result[start + 2 + end + 2..];
+            result = format!("{}{}{}", before, bold_text.bold(), after);
+        } else {
+            break;
+        }
+    }
+    
+    // Handle inline code
+    while let Some(start) = result.find('`') {
+        if let Some(end) = result[start + 1..].find('`') {
+            let before = &result[..start];
+            let code_text = &result[start + 1..start + 1 + end];
+            let after = &result[start + 1 + end + 1..];
+            result = format!("{}{}{}", before, code_text.on_bright_black().black(), after);
+        } else {
+            break;
+        }
+    }
+    
+    // Handle links [text](url) - just show the text part
+    while let Some(start) = result.find('[') {
+        if let Some(mid) = result[start..].find("](") {
+            if let Some(end) = result[start + mid + 2..].find(')') {
+                let before = &result[..start];
+                let link_text = &result[start + 1..start + mid];
+                let after = &result[start + mid + 2 + end + 1..];
+                result = format!("{}{}{}", before, link_text.bright_blue(), after);
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    
+    // Handle emphasis
+    result = result.replace("_", "");
+    
+    result
+}
+
 fn print_single_issue(issue: &Issue) {
     println!("\n{}", "─".repeat(80).bright_black());
     
@@ -1012,14 +1165,7 @@ fn print_single_issue(issue: &Issue) {
         if !desc.trim().is_empty() {
             println!("\n{}", "Description:".bold());
             println!("{}", "─".repeat(80).bright_black());
-            // Show full description with basic formatting preserved
-            for line in desc.lines() {
-                if line.trim().is_empty() {
-                    println!();
-                } else {
-                    println!("{}", line);
-                }
-            }
+            print_formatted_markdown(desc);
         }
     }
     
