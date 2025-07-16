@@ -161,7 +161,7 @@ struct Comment {
     created_at: String,
     #[serde(rename = "updatedAt")]
     updated_at: String,
-    user: User,
+    user: Option<User>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1714,7 +1714,7 @@ async fn handle_list_comments(matches: &ArgMatches) -> Result<(), Box<dyn std::e
         for comment in comments {
             println!("\n{} {} - {}", 
                 "▸".bright_blue(),
-                comment.user.name.bright_cyan(),
+                comment.user.as_ref().map(|u| u.name.as_str()).unwrap_or("Unknown").bright_cyan(),
                 format_relative_time(&comment.created_at).dimmed()
             );
             if comment.created_at != comment.updated_at {
@@ -1746,7 +1746,7 @@ async fn handle_add_comment(matches: &ArgMatches) -> Result<(), Box<dyn std::err
     
     println!("✅ Comment added successfully!");
     println!("Issue: {} - {}", issue.identifier, issue.title);
-    println!("Comment by: {}", comment.user.name);
+    println!("Comment by: {}", comment.user.as_ref().map(|u| u.name.as_str()).unwrap_or("Unknown"));
     println!("\n{}", format_markdown(&comment.body));
     
     Ok(())
@@ -1765,7 +1765,7 @@ async fn handle_update_comment(matches: &ArgMatches) -> Result<(), Box<dyn std::
     
     println!("✅ Comment updated successfully!");
     println!("Comment ID: {}", comment.id);
-    println!("Updated by: {}", comment.user.name);
+    println!("Updated by: {}", comment.user.as_ref().map(|u| u.name.as_str()).unwrap_or("Unknown"));
     println!("\n{}", format_markdown(&comment.body));
     
     Ok(())
