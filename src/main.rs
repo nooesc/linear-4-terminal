@@ -338,6 +338,57 @@ impl LinearClient {
         Ok(data.issues.nodes)
     }
 
+    async fn get_issue_by_identifier(&self, identifier: &str) -> Result<Issue, Box<dyn std::error::Error>> {
+        let query = r#"
+            query($identifier: String!) {
+                issue(id: $identifier) {
+                    id
+                    identifier
+                    title
+                    description
+                    url
+                    priority
+                    createdAt
+                    updatedAt
+                    state {
+                        id
+                        name
+                        type
+                    }
+                    assignee {
+                        id
+                        name
+                        email
+                    }
+                    team {
+                        id
+                        name
+                        key
+                    }
+                    labels {
+                        nodes {
+                            id
+                            name
+                            color
+                        }
+                    }
+                }
+            }
+        "#;
+
+        let variables = json!({
+            "identifier": identifier
+        });
+
+        #[derive(Debug, Deserialize)]
+        struct IssueData {
+            issue: Issue,
+        }
+
+        let data: IssueData = self.execute_query(query, Some(variables)).await?;
+        Ok(data.issue)
+    }
+
     async fn get_teams(&self) -> Result<Vec<Team>, Box<dyn std::error::Error>> {
         let query = r#"
             query {
@@ -894,6 +945,87 @@ fn truncate(s: &str, max_len: usize) -> String {
     }
 }
 
+fn print_single_issue(issue: &Issue) {
+    println!("\n{}", "─".repeat(80).bright_black());
+    
+    // Header with ID and title
+    println!("{} {} - {}", 
+             issue.identifier.bright_blue().bold(),
+             "│".bright_black(),
+             issue.title.bold());
+    
+    println!("{}", "─".repeat(80).bright_black());
+    
+    // Status, Priority, Assignee in one line
+    let priority_text = match issue.priority {
+        Some(0) => "None".normal(),
+        Some(1) => "Low".blue(),
+        Some(2) => "Medium".yellow(),
+        Some(3) => "High".bright_red(),
+        Some(4) => "Urgent".red().bold(),
+        _ => "None".normal(),
+    };
+    
+    let state_color = match issue.state.state_type.as_str() {
+        "backlog" => issue.state.name.white().dimmed(),
+        "unstarted" => issue.state.name.white(),
+        "started" => issue.state.name.yellow(),
+        "completed" => issue.state.name.green(),
+        "canceled" => issue.state.name.red().dimmed(),
+        _ => issue.state.name.normal(),
+    };
+    
+    println!("{}: {} {} {}: {} {} {}: {}",
+             "Status".bold(),
+             state_color,
+             "│".bright_black(),
+             "Priority".bold(),
+             priority_text,
+             "│".bright_black(),
+             "Team".bold(),
+             issue.team.name);
+    
+    // Assignee
+    if let Some(ref assignee) = issue.assignee {
+        println!("{}: {}", "Assignee".bold(), assignee.name);
+    }
+    
+    // Labels
+    if !issue.labels.nodes.is_empty() {
+        let labels = issue.labels.nodes
+            .iter()
+            .map(|l| format!("{}", l.name.cyan()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("{}: {}", "Labels".bold(), labels);
+    }
+    
+    // Timestamps
+    println!("{}: {}", "Created".bold(), issue.created_at.bright_black());
+    println!("{}: {}", "Updated".bold(), issue.updated_at.bright_black());
+    
+    // URL
+    println!("{}: {}", "URL".bold(), issue.url.bright_blue());
+    
+    // Description
+    if let Some(ref desc) = issue.description {
+        if !desc.trim().is_empty() {
+            println!("\n{}", "Description:".bold());
+            println!("{}", "─".repeat(80).bright_black());
+            // Show full description with basic formatting preserved
+            for line in desc.lines() {
+                if line.trim().is_empty() {
+                    println!();
+                } else {
+                    println!("{}", line);
+                }
+            }
+        }
+    }
+    
+    println!("{}", "─".repeat(80).bright_black());
+}
+
 fn clean_description(desc: &str) -> String {
     // Remove markdown headers
     let cleaned = desc
@@ -1101,6 +1233,19 @@ async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn std::
     println!("Name: {}", project.name);
     println!("URL: {}", project.url);
 
+    Ok(())
+}
+
+async fn handle_issue(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let api_key = get_api_key()?;
+    let client = LinearClient::new(api_key);
+    
+    let identifier = matches.get_one::<String>("identifier")
+        .ok_or("Issue identifier is required")?;
+    
+    let issue = client.get_issue_by_identifier(identifier).await?;
+    print_single_issue(&issue);
+    
     Ok(())
 }
 
@@ -1581,6 +1726,17 @@ async fn main() {
         .subcommand(
             Command::new("whoami")
                 .about("Show current user information")
+        )
+        .subcommand(
+            Command::new("issue")
+                .about("View a single issue with full details")
+                .arg(
+                    Arg::new("identifier")
+                        .value_name("ISSUE_ID")
+                        .help("Issue identifier (e.g., INF-31)")
+                        .required(true)
+                        .index(1)
+                )
         );
 
     let matches = app.get_matches();
@@ -1621,6 +1777,7 @@ async fn main() {
         Some(("teams", sub_matches)) => handle_teams(sub_matches).await,
         Some(("projects", sub_matches)) => handle_projects(sub_matches).await,
         Some(("whoami", sub_matches)) => handle_whoami(sub_matches).await,
+        Some(("issue", sub_matches)) => handle_issue(sub_matches).await,
         _ => {
             eprintln!("Unknown command. Use 'linear --help' for available commands.");
             process::exit(1);
