@@ -57,6 +57,18 @@ const PROJECT_FIELDS: &str = r#"
     progress
 "#;
 
+const COMMENT_FIELDS: &str = r#"
+    id
+    body
+    createdAt
+    updatedAt
+    user {
+        id
+        name
+        email
+    }
+"#;
+
 #[derive(Debug, Serialize, Deserialize)]
 struct Config {
     api_key: Option<String>,
@@ -141,6 +153,17 @@ struct Connection<T> {
     nodes: Vec<T>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct Comment {
+    id: String,
+    body: String,
+    #[serde(rename = "createdAt")]
+    created_at: String,
+    #[serde(rename = "updatedAt")]
+    updated_at: String,
+    user: User,
+}
+
 #[derive(Debug, Deserialize)]
 struct ViewerData {
     viewer: User,
@@ -212,6 +235,40 @@ struct IssueArchiveData {
 struct ProjectArchiveData {
     #[serde(rename = "projectArchive")]
     project_archive: ArchivePayload,
+}
+
+#[derive(Debug, Deserialize)]
+struct CommentsData {
+    issue: IssueWithComments,
+}
+
+#[derive(Debug, Deserialize)]
+struct IssueWithComments {
+    comments: Connection<Comment>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CommentCreateData {
+    #[serde(rename = "commentCreate")]
+    comment_create: CommentMutationPayload,
+}
+
+#[derive(Debug, Deserialize)]
+struct CommentUpdateData {
+    #[serde(rename = "commentUpdate")]
+    comment_update: CommentMutationPayload,
+}
+
+#[derive(Debug, Deserialize)]
+struct CommentDeleteData {
+    #[serde(rename = "commentDelete")]
+    comment_delete: ArchivePayload,
+}
+
+#[derive(Debug, Deserialize)]
+struct CommentMutationPayload {
+    success: bool,
+    comment: Option<Comment>,
 }
 
 struct LinearClient {
@@ -547,6 +604,179 @@ impl LinearClient {
         
         Ok(data.project_archive.success)
     }
+
+    async fn get_comments(&self, issue_id: &str) -> Result<Vec<Comment>, Box<dyn std::error::Error>> {
+        let query = format!(
+            r#"
+            query($issueId: String!) {{
+                issue(id: $issueId) {{
+                    comments {{
+                        nodes {{
+                            {}
+                        }}
+                    }}
+                }}
+            }}
+            "#,
+            COMMENT_FIELDS
+        );
+        let variables = json!({ "issueId": issue_id });
+        let data: CommentsData = self.execute_query(&query, Some(variables)).await?;
+        
+        Ok(data.issue.comments.nodes)
+    }
+
+    async fn create_comment(&self, issue_id: &str, body: &str) -> Result<Comment, Box<dyn std::error::Error>> {
+        let query = format!(
+            r#"
+            mutation($issueId: String!, $body: String!) {{
+                commentCreate(input: {{ issueId: $issueId, body: $body }}) {{
+                    success
+                    comment {{
+                        {}
+                    }}
+                }}
+            }}
+            "#,
+            COMMENT_FIELDS
+        );
+        let variables = json!({ "issueId": issue_id, "body": body });
+        let data: CommentCreateData = self.execute_query(&query, Some(variables)).await?;
+        
+        if data.comment_create.success {
+            data.comment_create.comment.ok_or("Failed to create comment".into())
+        } else {
+            Err("Failed to create comment".into())
+        }
+    }
+
+    async fn update_comment(&self, comment_id: &str, body: &str) -> Result<Comment, Box<dyn std::error::Error>> {
+        let query = format!(
+            r#"
+            mutation($id: String!, $body: String!) {{
+                commentUpdate(id: $id, input: {{ body: $body }}) {{
+                    success
+                    comment {{
+                        {}
+                    }}
+                }}
+            }}
+            "#,
+            COMMENT_FIELDS
+        );
+        let variables = json!({ "id": comment_id, "body": body });
+        let data: CommentUpdateData = self.execute_query(&query, Some(variables)).await?;
+        
+        if data.comment_update.success {
+            data.comment_update.comment.ok_or("Failed to update comment".into())
+        } else {
+            Err("Failed to update comment".into())
+        }
+    }
+
+    async fn delete_comment(&self, comment_id: &str) -> Result<bool, Box<dyn std::error::Error>> {
+        let query = r#"
+            mutation($id: String!) {
+                commentDelete(id: $id) {
+                    success
+                }
+            }
+        "#;
+        let variables = json!({ "id": comment_id });
+        let data: CommentDeleteData = self.execute_query(query, Some(variables)).await?;
+        
+        Ok(data.comment_delete.success)
+    }
+
+    async fn update_issue_bulk(
+        &self,
+        issue_id: &str,
+        state_id: Option<&str>,
+        assignee_id: Option<&str>,
+        priority: Option<u8>,
+        add_label_ids: Option<&[String]>,
+        remove_label_ids: Option<&[String]>,
+    ) -> Result<Issue, Box<dyn std::error::Error>> {
+        let mut input = json!({});
+        
+        if let Some(state_id) = state_id {
+            input["stateId"] = json!(state_id);
+        }
+        if let Some(assignee_id) = assignee_id {
+            input["assigneeId"] = json!(assignee_id);
+        }
+        if let Some(priority) = priority {
+            input["priority"] = json!(priority);
+        }
+        if let Some(add_labels) = add_label_ids {
+            input["labelIds"] = json!(add_labels);
+        }
+        if let Some(remove_labels) = remove_label_ids {
+            // For removing labels, we need to get current labels and filter them
+            // This is a simplified version - in production, you'd want to fetch current labels first
+            input["removeLabelIds"] = json!(remove_labels);
+        }
+        
+        let query = format!(
+            r#"
+            mutation($id: String!, $input: IssueUpdateInput!) {{
+                issueUpdate(id: $id, input: $input) {{
+                    success
+                    issue {{
+                        {}
+                    }}
+                }}
+            }}
+            "#,
+            ISSUE_FIELDS
+        );
+        
+        let variables = json!({
+            "id": issue_id,
+            "input": input
+        });
+        
+        let data: IssueUpdateData = self.execute_query(&query, Some(variables)).await?;
+        Self::check_success(data.issue_update.success, data.issue_update.issue, "Failed to update issue")
+    }
+
+    async fn move_issue(
+        &self,
+        issue_id: &str,
+        team_id: Option<&str>,
+        project_id: Option<&str>,
+    ) -> Result<Issue, Box<dyn std::error::Error>> {
+        let mut input = json!({});
+        
+        if let Some(team_id) = team_id {
+            input["teamId"] = json!(team_id);
+        }
+        if let Some(project_id) = project_id {
+            input["projectId"] = json!(project_id);
+        }
+        
+        let query = format!(
+            r#"
+            mutation($id: String!, $input: IssueUpdateInput!) {{
+                issueUpdate(id: $id, input: $input) {{
+                    success
+                    issue {{
+                        {}
+                    }}
+                }}
+            }}
+            "#,
+            ISSUE_FIELDS
+        );
+        
+        let variables = json!({
+            "id": issue_id,
+            "input": input
+        });
+        
+        let data: IssueUpdateData = self.execute_query(&query, Some(variables)).await?;
+        Self::check_success(data.issue_update.success, data.issue_update.issue, "Failed to move issue")
+    }
 }
 
 fn load_config() -> Config {
@@ -644,6 +874,36 @@ fn format_state_color(state: &WorkflowState) -> ColoredString {
         "completed" => state.name.green(),
         "canceled" => state.name.red().dimmed(),
         _ => state.name.normal(),
+    }
+}
+
+fn format_relative_time(timestamp: &str) -> String {
+    use chrono::{DateTime, Utc, Duration};
+    
+    let parsed = DateTime::parse_from_rfc3339(timestamp)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now());
+    
+    let now = Utc::now();
+    let diff = now.signed_duration_since(parsed);
+    
+    if diff < Duration::seconds(60) {
+        "just now".to_string()
+    } else if diff < Duration::minutes(60) {
+        let mins = diff.num_minutes();
+        format!("{} minute{} ago", mins, if mins == 1 { "" } else { "s" })
+    } else if diff < Duration::hours(24) {
+        let hours = diff.num_hours();
+        format!("{} hour{} ago", hours, if hours == 1 { "" } else { "s" })
+    } else if diff < Duration::days(30) {
+        let days = diff.num_days();
+        format!("{} day{} ago", days, if days == 1 { "" } else { "s" })
+    } else if diff < Duration::days(365) {
+        let months = diff.num_days() / 30;
+        format!("{} month{} ago", months, if months == 1 { "" } else { "s" })
+    } else {
+        let years = diff.num_days() / 365;
+        format!("{} year{} ago", years, if years == 1 { "" } else { "s" })
     }
 }
 
@@ -835,6 +1095,179 @@ fn truncate(s: &str, max_len: usize) -> String {
     } else {
         format!("{}...", &s[..max_len.saturating_sub(3)])
     }
+}
+
+fn format_links(text: &str) -> String {
+    let mut result = text.to_string();
+    while let Some(start) = result.find('[') {
+        if let Some(mid) = result[start..].find("](") {
+            if let Some(end) = result[start + mid + 2..].find(')') {
+                let link_text = &result[start + 1..start + mid];
+                let _link_url = &result[start + mid + 2..start + mid + 2 + end];
+                let formatted = format!("{}", link_text.bright_blue().underline());
+                result.replace_range(start..start + mid + 2 + end + 1, &formatted);
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    result
+}
+
+fn format_bold(text: &str) -> String {
+    let _result = text.to_string();
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut in_bold = false;
+    let mut chars = text.chars().peekable();
+    
+    while let Some(ch) = chars.next() {
+        if ch == '*' && chars.peek() == Some(&'*') {
+            chars.next(); // consume second *
+            if in_bold {
+                parts.push(current.bold().to_string());
+                current.clear();
+            } else {
+                parts.push(current.clone());
+                current.clear();
+            }
+            in_bold = !in_bold;
+        } else {
+            current.push(ch);
+        }
+    }
+    parts.push(current);
+    parts.join("")
+}
+
+fn format_italic(text: &str) -> String {
+    let _result = text.to_string();
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut in_italic = false;
+    let mut chars = text.chars().peekable();
+    
+    while let Some(ch) = chars.next() {
+        if (ch == '*' || ch == '_') && !in_italic {
+            if let Some(_end_pos) = text[chars.clone().count()..].find(ch) {
+                in_italic = true;
+                parts.push(current.clone());
+                current.clear();
+            } else {
+                current.push(ch);
+            }
+        } else if (ch == '*' || ch == '_') && in_italic {
+            parts.push(current.italic().to_string());
+            current.clear();
+            in_italic = false;
+        } else {
+            current.push(ch);
+        }
+    }
+    parts.push(current);
+    parts.join("")
+}
+
+fn format_markdown(text: &str) -> String {
+    let mut result = String::new();
+    let mut in_code_block = false;
+    let mut code_block_content: Vec<String> = Vec::new();
+    let mut consecutive_empty_lines = 0;
+    
+    for line in text.lines() {
+        let trimmed = line.trim();
+        
+        // Handle empty lines
+        if trimmed.is_empty() {
+            consecutive_empty_lines += 1;
+            if consecutive_empty_lines <= 1 {
+                result.push('\n');
+            }
+            continue;
+        } else {
+            consecutive_empty_lines = 0;
+        }
+        
+        // Code blocks
+        if trimmed.starts_with("```") {
+            if in_code_block {
+                // End of code block
+                for code_line in &code_block_content {
+                    result.push_str(&format!("    {}\n", code_line.bright_black()));
+                }
+                code_block_content.clear();
+                in_code_block = false;
+            } else {
+                // Start of code block
+                in_code_block = true;
+            }
+            continue;
+        }
+        
+        if in_code_block {
+            code_block_content.push(line.to_string());
+            continue;
+        }
+        
+        // Headers
+        if let Some(header) = trimmed.strip_prefix("# ") {
+            result.push_str(&format!("{}\n", header.bright_white().bold()));
+        } else if let Some(header) = trimmed.strip_prefix("## ") {
+            result.push_str(&format!("{}\n", header.bright_cyan().bold()));
+        } else if let Some(header) = trimmed.strip_prefix("### ") {
+            result.push_str(&format!("{}\n", header.cyan().bold()));
+        }
+        // Lists
+        else if let Some(item) = trimmed.strip_prefix("- ") {
+            result.push_str(&format!("  {} {}\n", "•".bright_blue(), item));
+        } else if let Some(item) = trimmed.strip_prefix("* ") {
+            result.push_str(&format!("  {} {}\n", "•".bright_blue(), item));
+        } else if let Some(item) = trimmed.strip_prefix("+ ") {
+            result.push_str(&format!("  {} {}\n", "•".bright_blue(), item));
+        }
+        // Numbered lists
+        else if trimmed.chars().next().map_or(false, |c| c.is_ascii_digit()) 
+            && trimmed.chars().nth(1) == Some('.') 
+            && trimmed.chars().nth(2) == Some(' ') {
+            let item = &trimmed[3..];
+            let num = &trimmed[..1];
+            result.push_str(&format!("  {} {}\n", num.bright_yellow(), item));
+        }
+        // Blockquotes
+        else if let Some(quote) = trimmed.strip_prefix("> ") {
+            result.push_str(&format!("  {} {}\n", "│".bright_black(), quote.italic()));
+        }
+        // Links
+        else if trimmed.contains("](") {
+            let formatted = format_links(trimmed);
+            result.push_str(&format!("{}\n", formatted));
+        }
+        // Bold text
+        else if trimmed.contains("**") {
+            let formatted = format_bold(trimmed);
+            result.push_str(&format!("{}\n", formatted));
+        }
+        // Italic text
+        else if trimmed.contains("*") || trimmed.contains("_") {
+            let formatted = format_italic(trimmed);
+            result.push_str(&format!("{}\n", formatted));
+        }
+        // Regular text
+        else {
+            result.push_str(&format!("{}\n", line));
+        }
+    }
+    
+    // Handle any remaining code block content
+    if in_code_block {
+        for code_line in &code_block_content {
+            result.push_str(&format!("    {}\n", code_line.bright_black()));
+        }
+    }
+    
+    result.trim_end().to_string()
 }
 
 fn print_formatted_markdown(text: &str) {
@@ -1257,6 +1690,264 @@ async fn handle_issue(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Er
     
     let issue = client.get_issue_by_identifier(identifier).await?;
     print_single_issue(&issue);
+    
+    Ok(())
+}
+
+async fn handle_list_comments(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let api_key = get_api_key()?;
+    let client = LinearClient::new(api_key);
+    
+    let issue_identifier = matches.get_one::<String>("issue")
+        .ok_or("Issue identifier is required")?;
+    
+    // First get the issue to get its ID
+    let issue = client.get_issue_by_identifier(issue_identifier).await?;
+    let comments = client.get_comments(&issue.id).await?;
+    
+    if comments.is_empty() {
+        println!("No comments found on issue {}.", issue_identifier);
+    } else {
+        println!("Comments on {} - {}:", issue.identifier, issue.title);
+        println!("{}", "─".repeat(80));
+        
+        for comment in comments {
+            println!("\n{} {} - {}", 
+                "▸".bright_blue(),
+                comment.user.name.bright_cyan(),
+                format_relative_time(&comment.created_at).dimmed()
+            );
+            if comment.created_at != comment.updated_at {
+                println!("  {} {}", 
+                    "Updated:".dimmed(),
+                    format_relative_time(&comment.updated_at).dimmed()
+                );
+            }
+            println!("\n{}", format_markdown(&comment.body));
+            println!("{}", "─".repeat(40).dimmed());
+        }
+    }
+    
+    Ok(())
+}
+
+async fn handle_add_comment(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let api_key = get_api_key()?;
+    let client = LinearClient::new(api_key);
+    
+    let issue_identifier = matches.get_one::<String>("issue")
+        .ok_or("Issue identifier is required")?;
+    let body = matches.get_one::<String>("body")
+        .ok_or("Comment body is required")?;
+    
+    // First get the issue to get its ID
+    let issue = client.get_issue_by_identifier(issue_identifier).await?;
+    let comment = client.create_comment(&issue.id, body).await?;
+    
+    println!("✅ Comment added successfully!");
+    println!("Issue: {} - {}", issue.identifier, issue.title);
+    println!("Comment by: {}", comment.user.name);
+    println!("\n{}", format_markdown(&comment.body));
+    
+    Ok(())
+}
+
+async fn handle_update_comment(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let api_key = get_api_key()?;
+    let client = LinearClient::new(api_key);
+    
+    let comment_id = matches.get_one::<String>("id")
+        .ok_or("Comment ID is required")?;
+    let body = matches.get_one::<String>("body")
+        .ok_or("Comment body is required")?;
+    
+    let comment = client.update_comment(comment_id, body).await?;
+    
+    println!("✅ Comment updated successfully!");
+    println!("Comment ID: {}", comment.id);
+    println!("Updated by: {}", comment.user.name);
+    println!("\n{}", format_markdown(&comment.body));
+    
+    Ok(())
+}
+
+async fn handle_delete_comment(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let api_key = get_api_key()?;
+    let client = LinearClient::new(api_key);
+    
+    let comment_id = matches.get_one::<String>("id")
+        .ok_or("Comment ID is required")?;
+    
+    let success = client.delete_comment(comment_id).await?;
+    
+    if success {
+        println!("✅ Comment deleted successfully!");
+        println!("Comment ID: {}", comment_id);
+    } else {
+        return Err("Failed to delete comment".into());
+    }
+    
+    Ok(())
+}
+
+fn parse_issue_ids(matches: &ArgMatches) -> Vec<String> {
+    let mut ids = Vec::new();
+    
+    if let Some(id_values) = matches.get_many::<String>("ids") {
+        for id_value in id_values {
+            // Split by comma if provided
+            for id in id_value.split(',') {
+                let trimmed = id.trim();
+                if !trimmed.is_empty() {
+                    ids.push(trimmed.to_string());
+                }
+            }
+        }
+    }
+    
+    ids
+}
+
+async fn handle_bulk_update(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let api_key = get_api_key()?;
+    let client = LinearClient::new(api_key);
+    
+    let issue_ids = parse_issue_ids(matches);
+    if issue_ids.is_empty() {
+        return Err("No issue IDs provided".into());
+    }
+    
+    let state_id = matches.get_one::<String>("state");
+    let assignee_id = matches.get_one::<String>("assignee");
+    let priority = matches.get_one::<String>("priority")
+        .and_then(|p| p.parse::<u8>().ok());
+    let labels = matches.get_one::<String>("labels")
+        .map(|l| l.split(',').map(|s| s.trim().to_string()).collect::<Vec<_>>());
+    let remove_labels = matches.get_one::<String>("remove-labels")
+        .map(|l| l.split(',').map(|s| s.trim().to_string()).collect::<Vec<_>>());
+    
+    if state_id.is_none() && assignee_id.is_none() && priority.is_none() && labels.is_none() && remove_labels.is_none() {
+        return Err("No update parameters provided. Use --state, --assignee, --priority, --labels, or --remove-labels".into());
+    }
+    
+    println!("Updating {} issues...", issue_ids.len());
+    
+    let mut success_count = 0;
+    let mut failed_ids = Vec::new();
+    
+    for issue_id in &issue_ids {
+        match client.update_issue_bulk(
+            issue_id,
+            state_id.map(|s| s.as_str()),
+            assignee_id.map(|s| s.as_str()),
+            priority,
+            labels.as_ref().map(|v| v.as_slice()),
+            remove_labels.as_ref().map(|v| v.as_slice()),
+        ).await {
+            Ok(_) => {
+                success_count += 1;
+                println!("  ✓ Updated {}", issue_id.bright_green());
+            }
+            Err(e) => {
+                failed_ids.push(issue_id.clone());
+                println!("  ✗ Failed to update {}: {}", issue_id.bright_red(), e);
+            }
+        }
+    }
+    
+    println!("\n✅ Successfully updated {} out of {} issues", success_count, issue_ids.len());
+    
+    if !failed_ids.is_empty() {
+        println!("❌ Failed to update: {}", failed_ids.join(", "));
+    }
+    
+    Ok(())
+}
+
+async fn handle_bulk_move(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let api_key = get_api_key()?;
+    let client = LinearClient::new(api_key);
+    
+    let issue_ids = parse_issue_ids(matches);
+    if issue_ids.is_empty() {
+        return Err("No issue IDs provided".into());
+    }
+    
+    let team_id = matches.get_one::<String>("team");
+    let project_id = matches.get_one::<String>("project");
+    
+    if team_id.is_none() && project_id.is_none() {
+        return Err("No move parameters provided. Use --team or --project".into());
+    }
+    
+    println!("Moving {} issues...", issue_ids.len());
+    
+    let mut success_count = 0;
+    let mut failed_ids = Vec::new();
+    
+    for issue_id in &issue_ids {
+        match client.move_issue(
+            issue_id,
+            team_id.map(|s| s.as_str()),
+            project_id.map(|s| s.as_str()),
+        ).await {
+            Ok(_) => {
+                success_count += 1;
+                println!("  ✓ Moved {}", issue_id.bright_green());
+            }
+            Err(e) => {
+                failed_ids.push(issue_id.clone());
+                println!("  ✗ Failed to move {}: {}", issue_id.bright_red(), e);
+            }
+        }
+    }
+    
+    println!("\n✅ Successfully moved {} out of {} issues", success_count, issue_ids.len());
+    
+    if !failed_ids.is_empty() {
+        println!("❌ Failed to move: {}", failed_ids.join(", "));
+    }
+    
+    Ok(())
+}
+
+async fn handle_bulk_archive(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let api_key = get_api_key()?;
+    let client = LinearClient::new(api_key);
+    
+    let issue_ids = parse_issue_ids(matches);
+    if issue_ids.is_empty() {
+        return Err("No issue IDs provided".into());
+    }
+    
+    println!("Archiving {} issues...", issue_ids.len());
+    
+    let mut success_count = 0;
+    let mut failed_ids = Vec::new();
+    
+    for issue_id in &issue_ids {
+        match client.archive_issue(issue_id).await {
+            Ok(success) => {
+                if success {
+                    success_count += 1;
+                    println!("  ✓ Archived {}", issue_id.bright_green());
+                } else {
+                    failed_ids.push(issue_id.clone());
+                    println!("  ✗ Failed to archive {}", issue_id.bright_red());
+                }
+            }
+            Err(e) => {
+                failed_ids.push(issue_id.clone());
+                println!("  ✗ Failed to archive {}: {}", issue_id.bright_red(), e);
+            }
+        }
+    }
+    
+    println!("\n✅ Successfully archived {} out of {} issues", success_count, issue_ids.len());
+    
+    if !failed_ids.is_empty() {
+        println!("❌ Failed to archive: {}", failed_ids.join(", "));
+    }
     
     Ok(())
 }
@@ -1734,6 +2425,159 @@ async fn main() {
                         .required(true)
                         .index(1)
                 )
+        )
+        .subcommand(
+            Command::new("bulk")
+                .about("Perform bulk operations on issues")
+                .subcommand_required(true)
+                .arg_required_else_help(true)
+                .subcommand(
+                    Command::new("update")
+                        .about("Update multiple issues at once")
+                        .arg(
+                            Arg::new("ids")
+                                .value_name("ISSUE_IDS")
+                                .help("Issue IDs to update (comma-separated or multiple args)")
+                                .required(true)
+                                .action(clap::ArgAction::Append)
+                                .index(1)
+                        )
+                        .arg(
+                            Arg::new("state")
+                                .long("state")
+                                .short('s')
+                                .value_name("STATE_ID")
+                                .help("New state ID for all issues")
+                        )
+                        .arg(
+                            Arg::new("assignee")
+                                .long("assignee")
+                                .short('a')
+                                .value_name("USER_ID")
+                                .help("New assignee ID for all issues")
+                        )
+                        .arg(
+                            Arg::new("priority")
+                                .long("priority")
+                                .short('p')
+                                .value_name("PRIORITY")
+                                .help("New priority (0-4) for all issues")
+                        )
+                        .arg(
+                            Arg::new("labels")
+                                .long("labels")
+                                .short('l')
+                                .value_name("LABEL_IDS")
+                                .help("Label IDs to add (comma-separated)")
+                        )
+                        .arg(
+                            Arg::new("remove-labels")
+                                .long("remove-labels")
+                                .value_name("LABEL_IDS")
+                                .help("Label IDs to remove (comma-separated)")
+                        )
+                )
+                .subcommand(
+                    Command::new("move")
+                        .about("Move multiple issues to a different team/project")
+                        .arg(
+                            Arg::new("ids")
+                                .value_name("ISSUE_IDS")
+                                .help("Issue IDs to move (comma-separated or multiple args)")
+                                .required(true)
+                                .action(clap::ArgAction::Append)
+                                .index(1)
+                        )
+                        .arg(
+                            Arg::new("team")
+                                .long("team")
+                                .short('t')
+                                .value_name("TEAM_ID")
+                                .help("New team ID for all issues")
+                        )
+                        .arg(
+                            Arg::new("project")
+                                .long("project")
+                                .value_name("PROJECT_ID")
+                                .help("New project ID for all issues")
+                        )
+                )
+                .subcommand(
+                    Command::new("archive")
+                        .about("Archive multiple issues at once")
+                        .arg(
+                            Arg::new("ids")
+                                .value_name("ISSUE_IDS")
+                                .help("Issue IDs to archive (comma-separated or multiple args)")
+                                .required(true)
+                                .action(clap::ArgAction::Append)
+                                .index(1)
+                        )
+                )
+        )
+        .subcommand(
+            Command::new("comment")
+                .about("Manage issue comments")
+                .subcommand_required(true)
+                .arg_required_else_help(true)
+                .subcommand(
+                    Command::new("list")
+                        .about("List comments on an issue")
+                        .arg(
+                            Arg::new("issue")
+                                .value_name("ISSUE_ID")
+                                .help("Issue identifier (e.g., INF-31)")
+                                .required(true)
+                                .index(1)
+                        )
+                )
+                .subcommand(
+                    Command::new("add")
+                        .about("Add a comment to an issue")
+                        .arg(
+                            Arg::new("issue")
+                                .value_name("ISSUE_ID")
+                                .help("Issue identifier (e.g., INF-31)")
+                                .required(true)
+                                .index(1)
+                        )
+                        .arg(
+                            Arg::new("body")
+                                .value_name("COMMENT")
+                                .help("Comment text")
+                                .required(true)
+                                .index(2)
+                        )
+                )
+                .subcommand(
+                    Command::new("update")
+                        .about("Update an existing comment")
+                        .arg(
+                            Arg::new("id")
+                                .value_name("COMMENT_ID")
+                                .help("Comment ID to update")
+                                .required(true)
+                                .index(1)
+                        )
+                        .arg(
+                            Arg::new("body")
+                                .value_name("COMMENT")
+                                .help("New comment text")
+                                .required(true)
+                                .index(2)
+                        )
+                )
+                .subcommand(
+                    Command::new("delete")
+                        .about("Delete a comment")
+                        .arg(
+                            Arg::new("id")
+                                .value_name("COMMENT_ID")
+                                .help("Comment ID to delete")
+                                .required(true)
+                                .index(1)
+                        )
+                )
         );
 
     let matches = app.get_matches();
@@ -1775,6 +2619,29 @@ async fn main() {
         Some(("projects", sub_matches)) => handle_projects(sub_matches).await,
         Some(("whoami", sub_matches)) => handle_whoami(sub_matches).await,
         Some(("issue", sub_matches)) => handle_issue(sub_matches).await,
+        Some(("bulk", sub_matches)) => {
+            match sub_matches.subcommand() {
+                Some(("update", bulk_matches)) => handle_bulk_update(bulk_matches).await,
+                Some(("move", bulk_matches)) => handle_bulk_move(bulk_matches).await,
+                Some(("archive", bulk_matches)) => handle_bulk_archive(bulk_matches).await,
+                _ => {
+                    eprintln!("Unknown bulk subcommand. Use 'linear bulk --help' for available options.");
+                    process::exit(1);
+                }
+            }
+        }
+        Some(("comment", sub_matches)) => {
+            match sub_matches.subcommand() {
+                Some(("list", comment_matches)) => handle_list_comments(comment_matches).await,
+                Some(("add", comment_matches)) => handle_add_comment(comment_matches).await,
+                Some(("update", comment_matches)) => handle_update_comment(comment_matches).await,
+                Some(("delete", comment_matches)) => handle_delete_comment(comment_matches).await,
+                _ => {
+                    eprintln!("Unknown comment subcommand. Use 'linear comment --help' for available options.");
+                    process::exit(1);
+                }
+            }
+        }
         _ => {
             eprintln!("Unknown command. Use 'linear --help' for available commands.");
             process::exit(1);
