@@ -28,3 +28,15 @@ Cargo.lock
 
 # Linear CLI config
 .linear-cli-config.json
+
+# Build artifacts and release files
+dist/
+*.tar.gz
+*.zip
+
+# Temporary formula file (should be in homebrew-tap repo)
+homebrew-formula.rb
+
+# Release planning docs (internal use)
+RELEASE.md
+homebrew-setup.md
