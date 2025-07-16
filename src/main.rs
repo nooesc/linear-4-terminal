@@ -815,8 +815,9 @@ fn print_issues(issues: &[Issue], format: &str) {
                     assignee_text,
                     labels_text,
                     if let Some(ref desc) = issue.description {
-                        if !desc.trim().is_empty() {
-                            format!("\n  {}", truncate(desc.trim(), 80)).bright_black()
+                        let cleaned = clean_description(desc);
+                        if !cleaned.is_empty() {
+                            format!("\n  {}", truncate(&cleaned, 80)).bright_black()
                         } else {
                             "".normal()
                         }
@@ -865,7 +866,14 @@ fn print_projects(projects: &[Project]) {
         
         let description = project.description
             .as_ref()
-            .map(|d| truncate(d.trim(), 48))
+            .map(|d| {
+                let cleaned = clean_description(d);
+                if cleaned.is_empty() {
+                    "-".bright_black().to_string()
+                } else {
+                    truncate(&cleaned, 48)
+                }
+            })
             .unwrap_or_else(|| "-".bright_black().to_string());
         
         println!(
@@ -883,6 +891,54 @@ fn truncate(s: &str, max_len: usize) -> String {
         s.to_string()
     } else {
         format!("{}...", &s[..max_len.saturating_sub(3)])
+    }
+}
+
+fn clean_description(desc: &str) -> String {
+    // Remove markdown headers
+    let cleaned = desc
+        .lines()
+        .map(|line| {
+            let line = line.trim();
+            if line.starts_with('#') {
+                // Remove # headers
+                line.trim_start_matches('#').trim()
+            } else {
+                line
+            }
+        })
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    
+    // Remove other markdown formatting
+    let cleaned = cleaned
+        .replace("**", "")
+        .replace("__", "")
+        .replace("```", "")
+        .replace("`", "")
+        .replace("*", "")
+        .replace("_", "")
+        .replace("[", "")
+        .replace("]", "")
+        .replace("(", "")
+        .replace(")", "")
+        .replace("- ", "")
+        .replace("• ", "")
+        .replace("  ", " ")
+        .trim()
+        .to_string();
+    
+    // Extract first sentence
+    if let Some(end) = cleaned.find(|c| c == '.' || c == '!' || c == '?') {
+        cleaned[..=end].trim().to_string()
+    } else {
+        // If no sentence ending found, take the first part up to a comma or semicolon
+        if let Some(end) = cleaned.find(|c| c == ',' || c == ';' || c == ':') {
+            cleaned[..end].trim().to_string()
+        } else {
+            cleaned
+        }
     }
 }
 
