@@ -2,6 +2,7 @@ use std::env;
 use std::fs;
 use std::path::Path;
 use std::process;
+use colored::*;
 
 use clap::{Arg, ArgMatches, Command};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
@@ -43,6 +44,7 @@ struct GraphQLError {
 #[derive(Debug, Deserialize, Serialize)]
 struct Issue {
     id: String,
+    identifier: String,
     title: String,
     description: Option<String>,
     url: String,
@@ -289,6 +291,7 @@ impl LinearClient {
                 issues(filter: $filter, first: $first) {
                     nodes {
                         id
+                        identifier
                         title
                         description
                         url
@@ -388,6 +391,7 @@ impl LinearClient {
                     success
                     issue {
                         id
+                        identifier
                         title
                         description
                         url
@@ -509,6 +513,7 @@ impl LinearClient {
                     success
                     issue {
                         id
+                        identifier
                         title
                         description
                         url
@@ -722,23 +727,103 @@ fn print_issues(issues: &[Issue], format: &str) {
             println!("{}", serde_json::to_string_pretty(issues).unwrap());
         }
         "table" => {
-            println!("{:<20} {:<60} {:<15} {:<15} {:<20}", "ID", "Title", "State", "Team", "Assignee");
-            println!("{}", "-".repeat(130));
+            println!("{:<12} {:<50} {:<15} {:<15} {:<20} {:<10}", 
+                     "ID".bold(), 
+                     "Title".bold(), 
+                     "State".bold(), 
+                     "Priority".bold(), 
+                     "Assignee".bold(),
+                     "Labels".bold());
+            println!("{}", "-".repeat(122));
             for issue in issues {
                 let assignee = issue.assignee.as_ref().map(|a| a.name.as_str()).unwrap_or("Unassigned");
+                let priority = match issue.priority {
+                    Some(0) => "None".normal(),
+                    Some(1) => "Low".blue(),
+                    Some(2) => "Medium".yellow(),
+                    Some(3) => "High".bright_red(),
+                    Some(4) => "Urgent".red().bold(),
+                    _ => "None".normal(),
+                };
+                let state_color = match issue.state.state_type.as_str() {
+                    "backlog" => issue.state.name.white().dimmed(),
+                    "unstarted" => issue.state.name.white(),
+                    "started" => issue.state.name.yellow(),
+                    "completed" => issue.state.name.green(),
+                    "canceled" => issue.state.name.red().dimmed(),
+                    _ => issue.state.name.normal(),
+                };
+                let labels = issue.labels.nodes
+                    .iter()
+                    .map(|l| l.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                
                 println!(
-                    "{:<20} {:<60} {:<15} {:<15} {:<20}",
-                    issue.id,
-                    truncate(&issue.title, 58),
-                    issue.state.name,
-                    issue.team.key,
-                    assignee
+                    "{:<12} {:<50} {:<15} {:<15} {:<20} {:<10}",
+                    issue.identifier.bright_blue().bold(),
+                    truncate(&issue.title, 48),
+                    state_color,
+                    priority,
+                    truncate(assignee, 18),
+                    truncate(&labels, 10)
                 );
             }
         }
         _ => {
             for issue in issues {
-                println!("• {} - {} ({})", issue.id, issue.title, issue.state.name);
+                let state_icon = match issue.state.state_type.as_str() {
+                    "backlog" => "⏸",
+                    "unstarted" => "○",
+                    "started" => "◐",
+                    "completed" => "✓",
+                    "canceled" => "✗",
+                    _ => "•",
+                };
+                
+                let priority_indicator = match issue.priority {
+                    Some(4) => " [URGENT]".red().bold(),
+                    Some(3) => " [HIGH]".bright_red(),
+                    Some(2) => " [MEDIUM]".yellow(),
+                    Some(1) => " [LOW]".blue(),
+                    _ => "".normal(),
+                };
+                
+                let assignee_text = if let Some(ref assignee) = issue.assignee {
+                    format!(" → {}", assignee.name).bright_black()
+                } else {
+                    "".normal()
+                };
+                
+                let labels_text = if !issue.labels.nodes.is_empty() {
+                    let labels = issue.labels.nodes
+                        .iter()
+                        .map(|l| l.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!(" [{}]", labels).cyan()
+                } else {
+                    "".normal()
+                };
+                
+                println!(
+                    "{} {} - {}{}{}{}{}",
+                    state_icon,
+                    issue.identifier.bright_blue().bold(),
+                    issue.title,
+                    priority_indicator,
+                    assignee_text,
+                    labels_text,
+                    if let Some(ref desc) = issue.description {
+                        if !desc.trim().is_empty() {
+                            format!("\n  {}", truncate(desc.trim(), 80)).bright_black()
+                        } else {
+                            "".normal()
+                        }
+                    } else {
+                        "".normal()
+                    }
+                );
             }
         }
     }
@@ -753,15 +838,42 @@ fn print_teams(teams: &[Team]) {
 }
 
 fn print_projects(projects: &[Project]) {
-    println!("{:<40} {:<30} {:<15} {:<10}", "ID", "Name", "State", "Progress");
-    println!("{}", "-".repeat(95));
+    println!("{:<30} {:<15} {:<10} {:<50}", 
+             "Name".bold(), 
+             "State".bold(), 
+             "Progress".bold(),
+             "Description".bold());
+    println!("{}", "-".repeat(105));
     for project in projects {
+        let state_color = match project.state.as_str() {
+            "planned" => project.state.blue(),
+            "started" => project.state.yellow(),
+            "completed" => project.state.green(),
+            "canceled" => project.state.red().dimmed(),
+            "backlog" => project.state.white().dimmed(),
+            _ => project.state.normal(),
+        };
+        
+        let progress_bar = {
+            let filled = (project.progress * 10.0) as usize;
+            let empty = 10 - filled;
+            format!("{}{} {:.0}%",
+                    "█".repeat(filled).green(),
+                    "░".repeat(empty).bright_black(),
+                    project.progress * 100.0)
+        };
+        
+        let description = project.description
+            .as_ref()
+            .map(|d| truncate(d.trim(), 48))
+            .unwrap_or_else(|| "-".bright_black().to_string());
+        
         println!(
-            "{:<40} {:<30} {:<15} {:<10.1}%",
-            project.id,
-            truncate(&project.name, 28),
-            project.state,
-            project.progress * 100.0
+            "{:<30} {:<15} {:<20} {:<50}",
+            truncate(&project.name, 28).bold(),
+            state_color,
+            progress_bar,
+            description
         );
     }
 }
@@ -901,11 +1013,12 @@ async fn handle_create_issue(matches: &ArgMatches) -> Result<(), Box<dyn std::er
         label_ids,
     ).await?;
 
-    println!("✅ Issue created successfully!");
-    println!("ID: {}", issue.id);
-    println!("Title: {}", issue.title);
-    println!("URL: {}", issue.url);
-    println!("Team: {}", issue.team.name);
+    println!("{} {}", "✅".green(), "Issue created successfully!".green().bold());
+    println!("{}: {}", "ID".bold(), issue.identifier.bright_blue().bold());
+    println!("{}: {}", "Title".bold(), issue.title);
+    println!("{}: {}", "URL".bold(), issue.url.bright_black());
+    println!("{}: {}", "Team".bold(), issue.team.name);
+    println!("{}: {}", "State".bold(), issue.state.name);
 
     Ok(())
 }
@@ -974,11 +1087,11 @@ async fn handle_update_issue(matches: &ArgMatches) -> Result<(), Box<dyn std::er
         label_ids,
     ).await?;
 
-    println!("✅ Issue updated successfully!");
-    println!("ID: {}", issue.id);
-    println!("Title: {}", issue.title);
-    println!("URL: {}", issue.url);
-    println!("State: {}", issue.state.name);
+    println!("{} {}", "✅".green(), "Issue updated successfully!".green().bold());
+    println!("{}: {}", "ID".bold(), issue.identifier.bright_blue().bold());
+    println!("{}: {}", "Title".bold(), issue.title);
+    println!("{}: {}", "URL".bold(), issue.url.bright_black());
+    println!("{}: {}", "State".bold(), issue.state.name);
 
     Ok(())
 }
