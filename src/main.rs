@@ -728,11 +728,9 @@ fn print_issues(issues: &[Issue], format: &str) {
                             
                             let priority_indicator = format_priority_indicator(issue.priority);
                             
-                            let assignee_text = if let Some(ref assignee) = issue.assignee {
-                                format!(" → {}", extract_first_name(&assignee.name).green())
-                            } else {
-                                "".to_string()
-                            };
+                            let assignee_name = issue.assignee.as_ref()
+                                .map(|a| extract_first_name(&a.name))
+                                .unwrap_or("");
                             
                             let labels_text = if !issue.labels.nodes.is_empty() {
                                 let labels = issue.labels.nodes
@@ -745,25 +743,28 @@ fn print_issues(issues: &[Issue], format: &str) {
                                 "".normal()
                             };
                             
-                            println!(
-                                "{} {} - {}{}{}{}{}",
+                            print!(
+                                "{} {} - {}{}",
                                 state_icon,
                                 issue.identifier.bright_blue().bold(),
                                 issue.title,
-                                priority_indicator,
-                                assignee_text,
-                                labels_text,
-                                if let Some(ref desc) = issue.description {
-                                    let cleaned = clean_description(desc);
-                                    if !cleaned.is_empty() {
-                                        format!("\n  {}", truncate(&cleaned, 80)).bright_black()
-                                    } else {
-                                        "".normal()
-                                    }
-                                } else {
-                                    "".normal()
-                                }
+                                priority_indicator
                             );
+                            
+                            if !assignee_name.is_empty() {
+                                print!(" → {}", assignee_name.green());
+                            }
+                            
+                            print!("{}", labels_text);
+                            
+                            if let Some(ref desc) = issue.description {
+                                let cleaned = clean_description(desc);
+                                if !cleaned.is_empty() {
+                                    print!("\n  {}", truncate(&cleaned, 80).bright_black());
+                                }
+                            }
+                            
+                            println!();
                         }
                     }
                 }
