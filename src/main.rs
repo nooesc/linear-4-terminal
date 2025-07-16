@@ -858,11 +858,11 @@ fn print_issues(issues: &[Issue], format: &str) {
                 };
                 
                 println!(
-                    "{} {} - {}{}{}{}{}",
+                    "{} {}{} - {}{}{}{}",
                     state_icon,
                     issue.identifier.bright_blue().bold(),
-                    issue.title,
                     priority_indicator,
+                    issue.title,
                     assignee_text,
                     labels_text,
                     if let Some(ref desc) = issue.description {
