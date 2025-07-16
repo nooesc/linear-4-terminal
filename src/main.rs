@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -884,9 +883,9 @@ fn print_issues(issues: &[Issue], format: &str) {
                                     // For regular names, use the first word
                                     assignee.name.split_whitespace().next().unwrap_or(&assignee.name)
                                 };
-                                format!(" → {}", first_name).bright_black()
+                                format!(" → {}", first_name.green())
                             } else {
-                                "".normal()
+                                "".to_string()
                             };
                             
                             let labels_text = if !issue.labels.nodes.is_empty() {
