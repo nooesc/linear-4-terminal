@@ -10,17 +10,52 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio;
 
-// Add these to your Cargo.toml:
-// [dependencies]
-// clap = "4.0"
-// reqwest = { version = "0.11", features = ["json"] }
-// serde = { version = "1.0", features = ["derive"] }
-// serde_json = "1.0"
-// tokio = { version = "1.0", features = ["full"] }
-// dirs = "5.0"
-
 const LINEAR_API_URL: &str = "https://api.linear.app/graphql";
 const CONFIG_FILE: &str = ".linear-cli-config.json";
+
+// Common GraphQL field selections
+const ISSUE_FIELDS: &str = r#"
+    id
+    identifier
+    title
+    description
+    url
+    priority
+    createdAt
+    updatedAt
+    state {
+        id
+        name
+        type
+    }
+    assignee {
+        id
+        name
+        email
+    }
+    team {
+        id
+        name
+        key
+    }
+    labels {
+        nodes {
+            id
+            name
+            color
+        }
+    }
+"#;
+
+const PROJECT_FIELDS: &str = r#"
+    id
+    name
+    description
+    url
+    createdAt
+    state
+    progress
+"#;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Config {
@@ -37,8 +72,6 @@ struct GraphQLResponse<T> {
 #[derive(Debug, Deserialize)]
 struct GraphQLError {
     message: String,
-    #[serde(default)]
-    path: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -99,35 +132,13 @@ struct Project {
     name: String,
     description: Option<String>,
     url: String,
-    #[serde(rename = "createdAt")]
-    created_at: String,
     state: String,
     progress: f64,
 }
 
 #[derive(Debug, Deserialize)]
-struct IssueConnection {
-    nodes: Vec<Issue>,
-    #[serde(rename = "pageInfo")]
-    page_info: PageInfo,
-}
-
-#[derive(Debug, Deserialize)]
-struct TeamConnection {
-    nodes: Vec<Team>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ProjectConnection {
-    nodes: Vec<Project>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PageInfo {
-    #[serde(rename = "hasNextPage")]
-    has_next_page: bool,
-    #[serde(rename = "endCursor")]
-    end_cursor: Option<String>,
+struct Connection<T> {
+    nodes: Vec<T>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -137,65 +148,58 @@ struct ViewerData {
 
 #[derive(Debug, Deserialize)]
 struct IssuesData {
-    issues: IssueConnection,
+    issues: Connection<Issue>,
 }
 
 #[derive(Debug, Deserialize)]
 struct TeamsData {
-    teams: TeamConnection,
+    teams: Connection<Team>,
 }
 
 #[derive(Debug, Deserialize)]
 struct ProjectsData {
-    projects: ProjectConnection,
+    projects: Connection<Project>,
+}
+
+#[derive(Debug, Deserialize)]
+struct IssueMutationPayload {
+    success: bool,
+    issue: Option<Issue>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProjectMutationPayload {
+    success: bool,
+    project: Option<Project>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ArchivePayload {
+    success: bool,
 }
 
 #[derive(Debug, Deserialize)]
 struct IssueCreateData {
     #[serde(rename = "issueCreate")]
-    issue_create: IssueCreatePayload,
-}
-
-#[derive(Debug, Deserialize)]
-struct IssueCreatePayload {
-    success: bool,
-    issue: Option<Issue>,
+    issue_create: IssueMutationPayload,
 }
 
 #[derive(Debug, Deserialize)]
 struct ProjectCreateData {
     #[serde(rename = "projectCreate")]
-    project_create: ProjectCreatePayload,
-}
-
-#[derive(Debug, Deserialize)]
-struct ProjectCreatePayload {
-    success: bool,
-    project: Option<Project>,
+    project_create: ProjectMutationPayload,
 }
 
 #[derive(Debug, Deserialize)]
 struct IssueUpdateData {
     #[serde(rename = "issueUpdate")]
-    issue_update: IssueUpdatePayload,
-}
-
-#[derive(Debug, Deserialize)]
-struct IssueUpdatePayload {
-    success: bool,
-    issue: Option<Issue>,
+    issue_update: IssueMutationPayload,
 }
 
 #[derive(Debug, Deserialize)]
 struct ProjectUpdateData {
     #[serde(rename = "projectUpdate")]
-    project_update: ProjectUpdatePayload,
-}
-
-#[derive(Debug, Deserialize)]
-struct ProjectUpdatePayload {
-    success: bool,
-    project: Option<Project>,
+    project_update: ProjectMutationPayload,
 }
 
 #[derive(Debug, Deserialize)]
@@ -210,14 +214,8 @@ struct ProjectArchiveData {
     project_archive: ArchivePayload,
 }
 
-#[derive(Debug, Deserialize)]
-struct ArchivePayload {
-    success: bool,
-}
-
 struct LinearClient {
     client: reqwest::Client,
-    api_key: String,
 }
 
 impl LinearClient {
@@ -234,7 +232,7 @@ impl LinearClient {
             .build()
             .expect("Failed to create HTTP client");
 
-        Self { client, api_key }
+        Self { client }
     }
 
     async fn execute_query<T: for<'de> Deserialize<'de>>(
@@ -286,95 +284,29 @@ impl LinearClient {
     }
 
     async fn get_issues(&self, filter: Option<Value>, first: Option<i32>) -> Result<Vec<Issue>, Box<dyn std::error::Error>> {
-        let query = r#"
-            query($filter: IssueFilter, $first: Int) {
-                issues(filter: $filter, first: $first) {
-                    nodes {
-                        id
-                        identifier
-                        title
-                        description
-                        url
-                        priority
-                        createdAt
-                        updatedAt
-                        state {
-                            id
-                            name
-                            type
-                        }
-                        assignee {
-                            id
-                            name
-                            email
-                        }
-                        team {
-                            id
-                            name
-                            key
-                        }
-                        labels {
-                            nodes {
-                                id
-                                name
-                                color
-                            }
-                        }
-                    }
-                    pageInfo {
-                        hasNextPage
-                        endCursor
-                    }
-                }
-            }
-        "#;
+        let query = format!(r#"
+            query($filter: IssueFilter, $first: Int) {{
+                issues(filter: $filter, first: $first) {{
+                    nodes {{{}}}
+                }}
+            }}
+        "#, ISSUE_FIELDS);
 
         let variables = json!({
             "filter": filter,
             "first": first.unwrap_or(50)
         });
 
-        let data: IssuesData = self.execute_query(query, Some(variables)).await?;
+        let data: IssuesData = self.execute_query(&query, Some(variables)).await?;
         Ok(data.issues.nodes)
     }
 
     async fn get_issue_by_identifier(&self, identifier: &str) -> Result<Issue, Box<dyn std::error::Error>> {
-        let query = r#"
-            query($identifier: String!) {
-                issue(id: $identifier) {
-                    id
-                    identifier
-                    title
-                    description
-                    url
-                    priority
-                    createdAt
-                    updatedAt
-                    state {
-                        id
-                        name
-                        type
-                    }
-                    assignee {
-                        id
-                        name
-                        email
-                    }
-                    team {
-                        id
-                        name
-                        key
-                    }
-                    labels {
-                        nodes {
-                            id
-                            name
-                            color
-                        }
-                    }
-                }
-            }
-        "#;
+        let query = format!(r#"
+            query($identifier: String!) {{
+                issue(id: $identifier) {{{}}}
+            }}
+        "#, ISSUE_FIELDS);
 
         let variables = json!({
             "identifier": identifier
@@ -385,7 +317,7 @@ impl LinearClient {
             issue: Issue,
         }
 
-        let data: IssueData = self.execute_query(query, Some(variables)).await?;
+        let data: IssueData = self.execute_query(&query, Some(variables)).await?;
         Ok(data.issue)
     }
 
@@ -407,23 +339,15 @@ impl LinearClient {
     }
 
     async fn get_projects(&self) -> Result<Vec<Project>, Box<dyn std::error::Error>> {
-        let query = r#"
-            query {
-                projects {
-                    nodes {
-                        id
-                        name
-                        description
-                        url
-                        createdAt
-                        state
-                        progress
-                    }
-                }
-            }
-        "#;
+        let query = format!(r#"
+            query {{
+                projects {{
+                    nodes {{{}}}
+                }}
+            }}
+        "#, PROJECT_FIELDS);
 
-        let data: ProjectsData = self.execute_query(query, None).await?;
+        let data: ProjectsData = self.execute_query(&query, None).await?;
         Ok(data.projects.nodes)
     }
 
@@ -436,45 +360,14 @@ impl LinearClient {
         assignee_id: Option<&str>,
         label_ids: Option<Vec<&str>>,
     ) -> Result<Issue, Box<dyn std::error::Error>> {
-        let query = r#"
-            mutation($input: IssueCreateInput!) {
-                issueCreate(input: $input) {
+        let query = format!(r#"
+            mutation($input: IssueCreateInput!) {{
+                issueCreate(input: $input) {{
                     success
-                    issue {
-                        id
-                        identifier
-                        title
-                        description
-                        url
-                        priority
-                        createdAt
-                        updatedAt
-                        state {
-                            id
-                            name
-                            type
-                        }
-                        assignee {
-                            id
-                            name
-                            email
-                        }
-                        team {
-                            id
-                            name
-                            key
-                        }
-                        labels {
-                            nodes {
-                                id
-                                name
-                                color
-                            }
-                        }
-                    }
-                }
-            }
-        "#;
+                    issue {{{}}}
+                }}
+            }}
+        "#, ISSUE_FIELDS);
 
         let mut input = json!({
             "title": title,
@@ -496,13 +389,15 @@ impl LinearClient {
 
         let variables = json!({ "input": input });
 
-        let data: IssueCreateData = self.execute_query(query, Some(variables)).await?;
-        
-        if !data.issue_create.success {
-            return Err("Failed to create issue".into());
+        let data: IssueCreateData = self.execute_query(&query, Some(variables)).await?;
+        Self::check_success(data.issue_create.success, data.issue_create.issue, "Failed to create issue")
+    }
+    
+    fn check_success<T>(success: bool, data: Option<T>, error_msg: &str) -> Result<T, Box<dyn std::error::Error>> {
+        if !success {
+            return Err(error_msg.into());
         }
-
-        data.issue_create.issue.ok_or("Issue not returned after creation".into())
+        data.ok_or_else(|| format!("{} but no data returned", error_msg).into())
     }
 
     async fn create_project(
@@ -511,22 +406,14 @@ impl LinearClient {
         description: Option<&str>,
         team_ids: Option<Vec<&str>>,
     ) -> Result<Project, Box<dyn std::error::Error>> {
-        let query = r#"
-            mutation($input: ProjectCreateInput!) {
-                projectCreate(input: $input) {
+        let query = format!(r#"
+            mutation($input: ProjectCreateInput!) {{
+                projectCreate(input: $input) {{
                     success
-                    project {
-                        id
-                        name
-                        description
-                        url
-                        createdAt
-                        state
-                        progress
-                    }
-                }
-            }
-        "#;
+                    project {{{}}}
+                }}
+            }}
+        "#, PROJECT_FIELDS);
 
         let mut input = json!({ "name": name });
 
@@ -539,13 +426,8 @@ impl LinearClient {
 
         let variables = json!({ "input": input });
 
-        let data: ProjectCreateData = self.execute_query(query, Some(variables)).await?;
-        
-        if !data.project_create.success {
-            return Err("Failed to create project".into());
-        }
-
-        data.project_create.project.ok_or("Project not returned after creation".into())
+        let data: ProjectCreateData = self.execute_query(&query, Some(variables)).await?;
+        Self::check_success(data.project_create.success, data.project_create.project, "Failed to create project")
     }
 
     async fn update_issue(
@@ -558,45 +440,14 @@ impl LinearClient {
         assignee_id: Option<&str>,
         label_ids: Option<Vec<&str>>,
     ) -> Result<Issue, Box<dyn std::error::Error>> {
-        let query = r#"
-            mutation($id: String!, $input: IssueUpdateInput!) {
-                issueUpdate(id: $id, input: $input) {
+        let query = format!(r#"
+            mutation($id: String!, $input: IssueUpdateInput!) {{
+                issueUpdate(id: $id, input: $input) {{
                     success
-                    issue {
-                        id
-                        identifier
-                        title
-                        description
-                        url
-                        priority
-                        createdAt
-                        updatedAt
-                        state {
-                            id
-                            name
-                            type
-                        }
-                        assignee {
-                            id
-                            name
-                            email
-                        }
-                        team {
-                            id
-                            name
-                            key
-                        }
-                        labels {
-                            nodes {
-                                id
-                                name
-                                color
-                            }
-                        }
-                    }
-                }
-            }
-        "#;
+                    issue {{{}}}
+                }}
+            }}
+        "#, ISSUE_FIELDS);
 
         let mut input = json!({});
 
@@ -624,13 +475,8 @@ impl LinearClient {
             "input": input 
         });
 
-        let data: IssueUpdateData = self.execute_query(query, Some(variables)).await?;
-        
-        if !data.issue_update.success {
-            return Err("Failed to update issue".into());
-        }
-
-        data.issue_update.issue.ok_or("Issue not returned after update".into())
+        let data: IssueUpdateData = self.execute_query(&query, Some(variables)).await?;
+        Self::check_success(data.issue_update.success, data.issue_update.issue, "Failed to update issue")
     }
 
     async fn update_project(
@@ -640,22 +486,14 @@ impl LinearClient {
         description: Option<&str>,
         state: Option<&str>,
     ) -> Result<Project, Box<dyn std::error::Error>> {
-        let query = r#"
-            mutation($id: String!, $input: ProjectUpdateInput!) {
-                projectUpdate(id: $id, input: $input) {
+        let query = format!(r#"
+            mutation($id: String!, $input: ProjectUpdateInput!) {{
+                projectUpdate(id: $id, input: $input) {{
                     success
-                    project {
-                        id
-                        name
-                        description
-                        url
-                        createdAt
-                        state
-                        progress
-                    }
-                }
-            }
-        "#;
+                    project {{{}}}
+                }}
+            }}
+        "#, PROJECT_FIELDS);
 
         let mut input = json!({});
 
@@ -674,13 +512,8 @@ impl LinearClient {
             "input": input 
         });
 
-        let data: ProjectUpdateData = self.execute_query(query, Some(variables)).await?;
-        
-        if !data.project_update.success {
-            return Err("Failed to update project".into());
-        }
-
-        data.project_update.project.ok_or("Project not returned after update".into())
+        let data: ProjectUpdateData = self.execute_query(&query, Some(variables)).await?;
+        Self::check_success(data.project_update.success, data.project_update.project, "Failed to update project")
     }
 
     async fn archive_issue(&self, issue_id: &str) -> Result<bool, Box<dyn std::error::Error>> {
@@ -772,6 +605,59 @@ fn get_api_key() -> Result<String, Box<dyn std::error::Error>> {
     Err("No API key found. Set LINEAR_API_KEY environment variable or run 'linear auth' to configure.".into())
 }
 
+fn extract_first_name(name: &str) -> &str {
+    if name.contains('@') {
+        // For email addresses, use the part before @
+        name.split('@').next().unwrap_or(name)
+    } else {
+        // For regular names, use the first word
+        name.split_whitespace().next().unwrap_or(name)
+    }
+}
+
+fn format_priority(priority: Option<u8>) -> ColoredString {
+    match priority {
+        Some(0) => "None".normal(),
+        Some(1) => "Low".blue(),
+        Some(2) => "Medium".yellow(),
+        Some(3) => "High".bright_red(),
+        Some(4) => "Urgent".red().bold(),
+        _ => "None".normal(),
+    }
+}
+
+fn format_priority_indicator(priority: Option<u8>) -> ColoredString {
+    match priority {
+        Some(4) => " [URGENT]".red().bold(),
+        Some(3) => " [HIGH]".bright_red(),
+        Some(2) => " [MEDIUM]".yellow(),
+        Some(1) => " [LOW]".blue(),
+        _ => "".normal(),
+    }
+}
+
+fn format_state_color(state: &WorkflowState) -> ColoredString {
+    match state.state_type.as_str() {
+        "backlog" => state.name.white().dimmed(),
+        "unstarted" => state.name.white(),
+        "started" => state.name.yellow(),
+        "completed" => state.name.green(),
+        "canceled" => state.name.red().dimmed(),
+        _ => state.name.normal(),
+    }
+}
+
+fn get_state_icon(state_type: &str) -> &'static str {
+    match state_type {
+        "backlog" => "⏸",
+        "unstarted" => "○",
+        "started" => "◐",
+        "completed" => "✓",
+        "canceled" => "✗",
+        _ => "•",
+    }
+}
+
 fn print_issues(issues: &[Issue], format: &str) {
     match format {
         "json" => {
@@ -788,30 +674,10 @@ fn print_issues(issues: &[Issue], format: &str) {
             println!("{}", "-".repeat(122));
             for issue in issues {
                 let assignee = issue.assignee.as_ref()
-                    .map(|a| {
-                        if a.name.contains('@') {
-                            a.name.split('@').next().unwrap_or(&a.name)
-                        } else {
-                            a.name.split_whitespace().next().unwrap_or(&a.name)
-                        }
-                    })
+                    .map(|a| extract_first_name(&a.name))
                     .unwrap_or("Unassigned");
-                let priority = match issue.priority {
-                    Some(0) => "None".normal(),
-                    Some(1) => "Low".blue(),
-                    Some(2) => "Medium".yellow(),
-                    Some(3) => "High".bright_red(),
-                    Some(4) => "Urgent".red().bold(),
-                    _ => "None".normal(),
-                };
-                let state_color = match issue.state.state_type.as_str() {
-                    "backlog" => issue.state.name.white().dimmed(),
-                    "unstarted" => issue.state.name.white(),
-                    "started" => issue.state.name.yellow(),
-                    "completed" => issue.state.name.green(),
-                    "canceled" => issue.state.name.red().dimmed(),
-                    _ => issue.state.name.normal(),
-                };
+                let priority = format_priority(issue.priority);
+                let state_color = format_state_color(&issue.state);
                 let labels = issue.labels.nodes
                     .iter()
                     .map(|l| l.name.as_str())
@@ -858,32 +724,12 @@ fn print_issues(issues: &[Issue], format: &str) {
                         println!();
                         
                         for issue in state_issues {
-                            let state_icon = match issue.state.state_type.as_str() {
-                                "backlog" => "⏸",
-                                "unstarted" => "○",
-                                "started" => "◐",
-                                "completed" => "✓",
-                                "canceled" => "✗",
-                                _ => "•",
-                            };
+                            let state_icon = get_state_icon(&issue.state.state_type);
                             
-                            let priority_indicator = match issue.priority {
-                                Some(4) => " [URGENT]".red().bold(),
-                                Some(3) => " [HIGH]".bright_red(),
-                                Some(2) => " [MEDIUM]".yellow(),
-                                Some(1) => " [LOW]".blue(),
-                                _ => "".normal(),
-                            };
+                            let priority_indicator = format_priority_indicator(issue.priority);
                             
                             let assignee_text = if let Some(ref assignee) = issue.assignee {
-                                let first_name = if assignee.name.contains('@') {
-                                    // For email addresses, use the part before @
-                                    assignee.name.split('@').next().unwrap_or(&assignee.name)
-                                } else {
-                                    // For regular names, use the first word
-                                    assignee.name.split_whitespace().next().unwrap_or(&assignee.name)
-                                };
-                                format!(" → {}", first_name.green())
+                                format!(" → {}", extract_first_name(&assignee.name).green())
                             } else {
                                 "".to_string()
                             };
@@ -1060,15 +906,15 @@ fn print_formatted_markdown(text: &str) {
             println!("  {} {}", "•".bright_green(), formatted);
         }
         // Handle numbered lists
-        else if trimmed.chars().next().map_or(false, |c| c.is_numeric()) && 
-                (trimmed.starts_with("1.") || trimmed.starts_with("2.") || trimmed.starts_with("3.") || 
-                 trimmed.starts_with("4.") || trimmed.starts_with("5.") || trimmed.starts_with("6.")) {
-            let parts: Vec<&str> = trimmed.splitn(2, '.').collect();
-            if parts.len() == 2 {
-                let num = parts[0];
-                let content = parts[1].trim();
+        else if let Some(dot_pos) = trimmed.find('.') {
+            if dot_pos > 0 && trimmed[..dot_pos].chars().all(|c| c.is_numeric()) {
+                let num = &trimmed[..dot_pos];
+                let content = trimmed[dot_pos + 1..].trim();
                 let formatted = format_inline_markdown(content);
                 println!("  {}. {}", num.bright_cyan(), formatted);
+            } else {
+                let formatted = format_inline_markdown(trimmed);
+                println!("{}", formatted);
             }
         }
         // Handle indented content (like sub-bullets)
@@ -1112,11 +958,12 @@ fn format_inline_markdown(text: &str) -> String {
     
     // Handle bold text
     while let Some(start) = result.find("**") {
-        if let Some(end) = result[start + 2..].find("**") {
+        let search_start = start + 2;
+        if let Some(end) = result[search_start..].find("**") {
             let before = &result[..start];
-            let bold_text = &result[start + 2..start + 2 + end];
-            let after = &result[start + 2 + end + 2..];
-            result = format!("{}{}{}", before, bold_text.bold(), after);
+            let content = &result[search_start..search_start + end];
+            let after = &result[search_start + end + 2..];
+            result = format!("{}{}{}", before, content.bold(), after);
         } else {
             break;
         }
@@ -1124,12 +971,12 @@ fn format_inline_markdown(text: &str) -> String {
     
     // Handle inline code
     while let Some(start) = result.find('`') {
-        if let Some(end) = result[start + 1..].find('`') {
+        let search_start = start + 1;
+        if let Some(end) = result[search_start..].find('`') {
             let before = &result[..start];
-            let code_text = &result[start + 1..start + 1 + end];
-            let after = &result[start + 1 + end + 1..];
-            // Use cyan color for inline code for better readability
-            result = format!("{}{}{}", before, code_text.cyan(), after);
+            let content = &result[search_start..search_start + end];
+            let after = &result[search_start + end + 1..];
+            result = format!("{}{}{}", before, content.cyan(), after);
         } else {
             break;
         }
@@ -1151,10 +998,7 @@ fn format_inline_markdown(text: &str) -> String {
         }
     }
     
-    // Handle emphasis
-    result = result.replace("_", "");
-    
-    result
+    result.replace('_', "")
 }
 
 fn print_single_issue(issue: &Issue) {
@@ -1169,23 +1013,9 @@ fn print_single_issue(issue: &Issue) {
     println!("{}", "─".repeat(80).bright_black());
     
     // Status, Priority, Assignee in one line
-    let priority_text = match issue.priority {
-        Some(0) => "None".normal(),
-        Some(1) => "Low".blue(),
-        Some(2) => "Medium".yellow(),
-        Some(3) => "High".bright_red(),
-        Some(4) => "Urgent".red().bold(),
-        _ => "None".normal(),
-    };
+    let priority_text = format_priority(issue.priority);
     
-    let state_color = match issue.state.state_type.as_str() {
-        "backlog" => issue.state.name.white().dimmed(),
-        "unstarted" => issue.state.name.white(),
-        "started" => issue.state.name.yellow(),
-        "completed" => issue.state.name.green(),
-        "canceled" => issue.state.name.red().dimmed(),
-        _ => issue.state.name.normal(),
-    };
+    let state_color = format_state_color(&issue.state);
     
     println!("{}: {} {} {}: {} {} {}: {}",
              "Status".bold(),
@@ -1232,51 +1062,27 @@ fn print_single_issue(issue: &Issue) {
 }
 
 fn clean_description(desc: &str) -> String {
-    // Remove markdown headers
+    // Remove markdown headers and join lines
     let cleaned = desc
         .lines()
-        .map(|line| {
-            let line = line.trim();
-            if line.starts_with('#') {
-                // Remove # headers
-                line.trim_start_matches('#').trim()
-            } else {
-                line
-            }
-        })
+        .map(|line| line.trim().trim_start_matches('#').trim())
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
         .join(" ");
     
-    // Remove other markdown formatting
-    let cleaned = cleaned
-        .replace("**", "")
-        .replace("__", "")
-        .replace("```", "")
-        .replace("`", "")
-        .replace("*", "")
-        .replace("_", "")
-        .replace("[", "")
-        .replace("]", "")
-        .replace("(", "")
-        .replace(")", "")
-        .replace("- ", "")
-        .replace("• ", "")
-        .replace("  ", " ")
-        .trim()
-        .to_string();
+    // Remove markdown formatting
+    let mut cleaned = cleaned;
+    for pattern in &["**", "__", "```", "`", "*", "_", "[", "]", "(", ")", "- ", "• ", "  "] {
+        cleaned = cleaned.replace(pattern, " ");
+    }
+    let cleaned = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
     
     // Extract first sentence
-    if let Some(end) = cleaned.find(|c| c == '.' || c == '!' || c == '?') {
-        cleaned[..=end].trim().to_string()
-    } else {
-        // If no sentence ending found, take the first part up to a comma or semicolon
-        if let Some(end) = cleaned.find(|c| c == ',' || c == ';' || c == ':') {
-            cleaned[..end].trim().to_string()
-        } else {
-            cleaned
-        }
-    }
+    cleaned
+        .find(|c: char| ".!?".contains(c))
+        .or_else(|| cleaned.find(|c: char| ",;:".contains(c)))
+        .map(|pos| cleaned[..pos].trim().to_string())
+        .unwrap_or(cleaned)
 }
 
 async fn handle_auth(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
@@ -1534,39 +1340,24 @@ async fn handle_update_project(matches: &ArgMatches) -> Result<(), Box<dyn std::
     Ok(())
 }
 
-async fn handle_delete_issue(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+async fn handle_delete(matches: &ArgMatches, resource_type: &str) -> Result<(), Box<dyn std::error::Error>> {
     let api_key = get_api_key()?;
     let client = LinearClient::new(api_key);
 
-    let issue_id = matches.get_one::<String>("id")
-        .ok_or("Issue ID is required")?;
+    let id = matches.get_one::<String>("id")
+        .ok_or(format!("{} ID is required", resource_type))?;
     
-    let success = client.archive_issue(issue_id).await?;
-    
-    if success {
-        println!("✅ Issue archived successfully!");
-        println!("Issue ID: {}", issue_id);
-    } else {
-        return Err("Failed to archive issue".into());
-    }
-
-    Ok(())
-}
-
-async fn handle_delete_project(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
-    let api_key = get_api_key()?;
-    let client = LinearClient::new(api_key);
-
-    let project_id = matches.get_one::<String>("id")
-        .ok_or("Project ID is required")?;
-    
-    let success = client.archive_project(project_id).await?;
+    let success = match resource_type {
+        "Issue" => client.archive_issue(id).await?,
+        "Project" => client.archive_project(id).await?,
+        _ => return Err("Invalid resource type".into()),
+    };
     
     if success {
-        println!("✅ Project archived successfully!");
-        println!("Project ID: {}", project_id);
+        println!("✅ {} archived successfully!", resource_type);
+        println!("{} ID: {}", resource_type, id);
     } else {
-        return Err("Failed to archive project".into());
+        return Err(format!("Failed to archive {}", resource_type.to_lowercase()).into());
     }
 
     Ok(())
@@ -1971,8 +1762,8 @@ async fn main() {
         }
         Some(("delete", sub_matches)) => {
             match sub_matches.subcommand() {
-                Some(("issue", issue_matches)) => handle_delete_issue(issue_matches).await,
-                Some(("project", project_matches)) => handle_delete_project(project_matches).await,
+                Some(("issue", issue_matches)) => handle_delete(issue_matches, "Issue").await,
+                Some(("project", project_matches)) => handle_delete(project_matches, "Project").await,
                 _ => {
                     eprintln!("Unknown delete subcommand. Use 'linear delete --help' for available options.");
                     process::exit(1);
