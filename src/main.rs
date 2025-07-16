@@ -172,6 +172,47 @@ struct ProjectCreatePayload {
     project: Option<Project>,
 }
 
+#[derive(Debug, Deserialize)]
+struct IssueUpdateData {
+    #[serde(rename = "issueUpdate")]
+    issue_update: IssueUpdatePayload,
+}
+
+#[derive(Debug, Deserialize)]
+struct IssueUpdatePayload {
+    success: bool,
+    issue: Option<Issue>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProjectUpdateData {
+    #[serde(rename = "projectUpdate")]
+    project_update: ProjectUpdatePayload,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProjectUpdatePayload {
+    success: bool,
+    project: Option<Project>,
+}
+
+#[derive(Debug, Deserialize)]
+struct IssueArchiveData {
+    #[serde(rename = "issueArchive")]
+    issue_archive: ArchivePayload,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProjectArchiveData {
+    #[serde(rename = "projectArchive")]
+    project_archive: ArchivePayload,
+}
+
+#[derive(Debug, Deserialize)]
+struct ArchivePayload {
+    success: bool,
+}
+
 struct LinearClient {
     client: reqwest::Client,
     api_key: String,
@@ -451,6 +492,172 @@ impl LinearClient {
 
         data.project_create.project.ok_or("Project not returned after creation".into())
     }
+
+    async fn update_issue(
+        &self,
+        issue_id: &str,
+        title: Option<&str>,
+        description: Option<&str>,
+        state_id: Option<&str>,
+        priority: Option<u8>,
+        assignee_id: Option<&str>,
+        label_ids: Option<Vec<&str>>,
+    ) -> Result<Issue, Box<dyn std::error::Error>> {
+        let query = r#"
+            mutation($id: String!, $input: IssueUpdateInput!) {
+                issueUpdate(id: $id, input: $input) {
+                    success
+                    issue {
+                        id
+                        title
+                        description
+                        url
+                        priority
+                        createdAt
+                        updatedAt
+                        state {
+                            id
+                            name
+                            type
+                        }
+                        assignee {
+                            id
+                            name
+                            email
+                        }
+                        team {
+                            id
+                            name
+                            key
+                        }
+                        labels {
+                            nodes {
+                                id
+                                name
+                                color
+                            }
+                        }
+                    }
+                }
+            }
+        "#;
+
+        let mut input = json!({});
+
+        if let Some(t) = title {
+            input["title"] = json!(t);
+        }
+        if let Some(desc) = description {
+            input["description"] = json!(desc);
+        }
+        if let Some(state) = state_id {
+            input["stateId"] = json!(state);
+        }
+        if let Some(prio) = priority {
+            input["priority"] = json!(prio);
+        }
+        if let Some(assignee) = assignee_id {
+            input["assigneeId"] = json!(assignee);
+        }
+        if let Some(labels) = label_ids {
+            input["labelIds"] = json!(labels);
+        }
+
+        let variables = json!({ 
+            "id": issue_id,
+            "input": input 
+        });
+
+        let data: IssueUpdateData = self.execute_query(query, Some(variables)).await?;
+        
+        if !data.issue_update.success {
+            return Err("Failed to update issue".into());
+        }
+
+        data.issue_update.issue.ok_or("Issue not returned after update".into())
+    }
+
+    async fn update_project(
+        &self,
+        project_id: &str,
+        name: Option<&str>,
+        description: Option<&str>,
+        state: Option<&str>,
+    ) -> Result<Project, Box<dyn std::error::Error>> {
+        let query = r#"
+            mutation($id: String!, $input: ProjectUpdateInput!) {
+                projectUpdate(id: $id, input: $input) {
+                    success
+                    project {
+                        id
+                        name
+                        description
+                        url
+                        createdAt
+                        state
+                        progress
+                    }
+                }
+            }
+        "#;
+
+        let mut input = json!({});
+
+        if let Some(n) = name {
+            input["name"] = json!(n);
+        }
+        if let Some(desc) = description {
+            input["description"] = json!(desc);
+        }
+        if let Some(s) = state {
+            input["state"] = json!(s);
+        }
+
+        let variables = json!({ 
+            "id": project_id,
+            "input": input 
+        });
+
+        let data: ProjectUpdateData = self.execute_query(query, Some(variables)).await?;
+        
+        if !data.project_update.success {
+            return Err("Failed to update project".into());
+        }
+
+        data.project_update.project.ok_or("Project not returned after update".into())
+    }
+
+    async fn archive_issue(&self, issue_id: &str) -> Result<bool, Box<dyn std::error::Error>> {
+        let query = r#"
+            mutation($id: String!) {
+                issueArchive(id: $id) {
+                    success
+                }
+            }
+        "#;
+
+        let variables = json!({ "id": issue_id });
+
+        let data: IssueArchiveData = self.execute_query(query, Some(variables)).await?;
+        
+        Ok(data.issue_archive.success)
+    }
+
+    async fn archive_project(&self, project_id: &str) -> Result<bool, Box<dyn std::error::Error>> {
+        let query = r#"
+            mutation($id: String!) {
+                projectArchive(id: $id) {
+                    success
+                }
+            }
+        "#;
+
+        let variables = json!({ "id": project_id });
+
+        let data: ProjectArchiveData = self.execute_query(query, Some(variables)).await?;
+        
+        Ok(data.project_archive.success)
+    }
 }
 
 fn load_config() -> Config {
@@ -728,6 +935,124 @@ async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn std::
     Ok(())
 }
 
+async fn handle_update_issue(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let api_key = get_api_key()?;
+    let client = LinearClient::new(api_key);
+
+    let issue_id = matches.get_one::<String>("id")
+        .ok_or("Issue ID is required")?;
+    
+    let title = matches.get_one::<String>("title");
+    let description = matches.get_one::<String>("description");
+    let state_id = matches.get_one::<String>("state");
+    let priority = matches.get_one::<String>("priority")
+        .and_then(|p| match p.as_str() {
+            "none" | "0" => Some(0),
+            "low" | "1" => Some(1),
+            "medium" | "2" => Some(2),
+            "high" | "3" => Some(3),
+            "urgent" | "4" => Some(4),
+            _ => None,
+        });
+    let assignee_id = matches.get_one::<String>("assignee");
+    let label_ids: Option<Vec<&str>> = matches.get_many::<String>("labels")
+        .map(|labels| labels.map(|s| s.as_str()).collect());
+
+    // Check if at least one field is being updated
+    if title.is_none() && description.is_none() && state_id.is_none() && 
+       priority.is_none() && assignee_id.is_none() && label_ids.is_none() {
+        return Err("No fields to update. Provide at least one field to update.".into());
+    }
+
+    let issue = client.update_issue(
+        issue_id,
+        title.map(|s| s.as_str()),
+        description.map(|s| s.as_str()),
+        state_id.map(|s| s.as_str()),
+        priority,
+        assignee_id.map(|s| s.as_str()),
+        label_ids,
+    ).await?;
+
+    println!("✅ Issue updated successfully!");
+    println!("ID: {}", issue.id);
+    println!("Title: {}", issue.title);
+    println!("URL: {}", issue.url);
+    println!("State: {}", issue.state.name);
+
+    Ok(())
+}
+
+async fn handle_update_project(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let api_key = get_api_key()?;
+    let client = LinearClient::new(api_key);
+
+    let project_id = matches.get_one::<String>("id")
+        .ok_or("Project ID is required")?;
+    
+    let name = matches.get_one::<String>("name");
+    let description = matches.get_one::<String>("description");
+    let state = matches.get_one::<String>("state");
+
+    // Check if at least one field is being updated
+    if name.is_none() && description.is_none() && state.is_none() {
+        return Err("No fields to update. Provide at least one field to update.".into());
+    }
+
+    let project = client.update_project(
+        project_id,
+        name.map(|s| s.as_str()),
+        description.map(|s| s.as_str()),
+        state.map(|s| s.as_str()),
+    ).await?;
+
+    println!("✅ Project updated successfully!");
+    println!("ID: {}", project.id);
+    println!("Name: {}", project.name);
+    println!("URL: {}", project.url);
+    println!("State: {}", project.state);
+
+    Ok(())
+}
+
+async fn handle_delete_issue(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let api_key = get_api_key()?;
+    let client = LinearClient::new(api_key);
+
+    let issue_id = matches.get_one::<String>("id")
+        .ok_or("Issue ID is required")?;
+    
+    let success = client.archive_issue(issue_id).await?;
+    
+    if success {
+        println!("✅ Issue archived successfully!");
+        println!("Issue ID: {}", issue_id);
+    } else {
+        return Err("Failed to archive issue".into());
+    }
+
+    Ok(())
+}
+
+async fn handle_delete_project(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let api_key = get_api_key()?;
+    let client = LinearClient::new(api_key);
+
+    let project_id = matches.get_one::<String>("id")
+        .ok_or("Project ID is required")?;
+    
+    let success = client.archive_project(project_id).await?;
+    
+    if success {
+        println!("✅ Project archived successfully!");
+        println!("Project ID: {}", project_id);
+    } else {
+        return Err("Failed to archive project".into());
+    }
+
+    Ok(())
+}
+
 async fn handle_teams(_matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let api_key = get_api_key()?;
     let client = LinearClient::new(api_key);
@@ -959,6 +1284,124 @@ async fn main() {
                 )
         )
         .subcommand(
+            Command::new("update")
+                .about("Update Linear resources")
+                .subcommand_required(true)
+                .subcommand(
+                    Command::new("issue")
+                        .about("Update an existing issue")
+                        .arg(
+                            Arg::new("id")
+                                .value_name("ISSUE_ID")
+                                .help("Issue ID to update")
+                                .required(true)
+                                .index(1)
+                        )
+                        .arg(
+                            Arg::new("title")
+                                .long("title")
+                                .short('t')
+                                .value_name("TITLE")
+                                .help("New issue title")
+                        )
+                        .arg(
+                            Arg::new("description")
+                                .long("description")
+                                .short('d')
+                                .value_name("DESCRIPTION")
+                                .help("New issue description")
+                        )
+                        .arg(
+                            Arg::new("state")
+                                .long("state")
+                                .short('s')
+                                .value_name("STATE_ID")
+                                .help("New state ID")
+                        )
+                        .arg(
+                            Arg::new("priority")
+                                .long("priority")
+                                .short('p')
+                                .value_name("PRIORITY")
+                                .help("Priority: none/0, low/1, medium/2, high/3, urgent/4")
+                        )
+                        .arg(
+                            Arg::new("assignee")
+                                .long("assignee")
+                                .short('a')
+                                .value_name("USER_ID")
+                                .help("New assignee user ID")
+                        )
+                        .arg(
+                            Arg::new("labels")
+                                .long("labels")
+                                .short('l')
+                                .value_name("LABEL_ID")
+                                .help("New label IDs")
+                                .action(clap::ArgAction::Append)
+                        )
+                )
+                .subcommand(
+                    Command::new("project")
+                        .about("Update an existing project")
+                        .arg(
+                            Arg::new("id")
+                                .value_name("PROJECT_ID")
+                                .help("Project ID to update")
+                                .required(true)
+                                .index(1)
+                        )
+                        .arg(
+                            Arg::new("name")
+                                .long("name")
+                                .short('n')
+                                .value_name("NAME")
+                                .help("New project name")
+                        )
+                        .arg(
+                            Arg::new("description")
+                                .long("description")
+                                .short('d')
+                                .value_name("DESCRIPTION")
+                                .help("New project description")
+                        )
+                        .arg(
+                            Arg::new("state")
+                                .long("state")
+                                .short('s')
+                                .value_name("STATE")
+                                .help("New project state")
+                        )
+                )
+        )
+        .subcommand(
+            Command::new("delete")
+                .about("Delete (archive) Linear resources")
+                .subcommand_required(true)
+                .subcommand(
+                    Command::new("issue")
+                        .about("Archive an issue")
+                        .arg(
+                            Arg::new("id")
+                                .value_name("ISSUE_ID")
+                                .help("Issue ID to archive")
+                                .required(true)
+                                .index(1)
+                        )
+                )
+                .subcommand(
+                    Command::new("project")
+                        .about("Archive a project")
+                        .arg(
+                            Arg::new("id")
+                                .value_name("PROJECT_ID")
+                                .help("Project ID to archive")
+                                .required(true)
+                                .index(1)
+                        )
+                )
+        )
+        .subcommand(
             Command::new("teams")
                 .about("List teams")
         )
@@ -982,6 +1425,26 @@ async fn main() {
                 Some(("project", project_matches)) => handle_create_project(project_matches).await,
                 _ => {
                     eprintln!("Unknown create subcommand. Use 'linear create --help' for available options.");
+                    process::exit(1);
+                }
+            }
+        }
+        Some(("update", sub_matches)) => {
+            match sub_matches.subcommand() {
+                Some(("issue", issue_matches)) => handle_update_issue(issue_matches).await,
+                Some(("project", project_matches)) => handle_update_project(project_matches).await,
+                _ => {
+                    eprintln!("Unknown update subcommand. Use 'linear update --help' for available options.");
+                    process::exit(1);
+                }
+            }
+        }
+        Some(("delete", sub_matches)) => {
+            match sub_matches.subcommand() {
+                Some(("issue", issue_matches)) => handle_delete_issue(issue_matches).await,
+                Some(("project", project_matches)) => handle_delete_project(project_matches).await,
+                _ => {
+                    eprintln!("Unknown delete subcommand. Use 'linear delete --help' for available options.");
                     process::exit(1);
                 }
             }

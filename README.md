@@ -125,6 +125,31 @@ linear create issue "New feature" "Implement dark mode" \
 linear create issue "Urgent fix" "Critical bug" --priority urgent
 ```
 
+#### Update Issues
+```bash
+# Update issue title
+linear update issue issue_id --title "New title"
+
+# Update multiple fields
+linear update issue issue_id \
+  --title "Updated title" \
+  --description "New description" \
+  --priority high \
+  --state state_id
+
+# Change assignee
+linear update issue issue_id --assignee user_id
+
+# Update labels
+linear update issue issue_id --labels label_id_1 label_id_2
+```
+
+#### Delete Issues
+```bash
+# Archive an issue
+linear delete issue issue_id
+```
+
 ### Project Commands
 
 #### List Projects
@@ -141,6 +166,24 @@ linear create project "Q4 Initiative" "Major improvements for Q4"
 # With teams
 linear create project "Mobile App" "iOS and Android apps" \
   --teams team_id_1 team_id_2
+```
+
+#### Update Projects
+```bash
+# Update project name
+linear update project project_id --name "New name"
+
+# Update multiple fields
+linear update project project_id \
+  --name "Updated project" \
+  --description "New description" \
+  --state "backlog"
+```
+
+#### Delete Projects
+```bash
+# Archive a project
+linear delete project project_id
 ```
 
 ### Team Commands
@@ -313,9 +356,9 @@ This CLI covers the major Linear API operations:
 ### Mutations
 - ✅ Create issues
 - ✅ Create projects
-- 🔄 Update issues (planned)
-- 🔄 Update projects (planned)
-- 🔄 Delete operations (planned)
+- ✅ Update issues
+- ✅ Update projects
+- ✅ Delete operations (archive)
 
 ### Filters
 - ✅ State-based filtering (todo, triage, progress, done)
@@ -356,15 +399,17 @@ For debugging, you can inspect the API calls by modifying the code to add debug 
 
 ## Contributing
 
-This is a single-file CLI tool that can be easily extended. Some areas for improvement:
+This is a comprehensive CLI tool that can be easily extended. Some areas for improvement:
 
-- [ ] Add issue update/delete operations
 - [ ] Add comment management
 - [ ] Add label management
 - [ ] Add more sophisticated filtering
 - [ ] Add configuration for default values
 - [ ] Add shell completion scripts
 - [ ] Add more output formatting options
+- [ ] Add pagination support for large result sets
+- [ ] Add batch operations for multiple items
+- [ ] Add interactive mode for guided operations
 
 ## License
 
