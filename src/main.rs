@@ -1,0 +1,1002 @@
+use std::env;
+use std::fs;
+use std::path::Path;
+use std::process;
+
+use clap::{Arg, ArgMatches, Command};
+use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use tokio;
+
+// Add these to your Cargo.toml:
+// [dependencies]
+// clap = "4.0"
+// reqwest = { version = "0.11", features = ["json"] }
+// serde = { version = "1.0", features = ["derive"] }
+// serde_json = "1.0"
+// tokio = { version = "1.0", features = ["full"] }
+// dirs = "5.0"
+
+const LINEAR_API_URL: &str = "https://api.linear.app/graphql";
+const CONFIG_FILE: &str = ".linear-cli-config.json";
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Config {
+    api_key: Option<String>,
+    default_team_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphQLResponse<T> {
+    data: Option<T>,
+    errors: Option<Vec<GraphQLError>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphQLError {
+    message: String,
+    #[serde(default)]
+    path: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct Issue {
+    id: String,
+    title: String,
+    description: Option<String>,
+    url: String,
+    priority: Option<u8>,
+    #[serde(rename = "createdAt")]
+    created_at: String,
+    #[serde(rename = "updatedAt")]
+    updated_at: String,
+    state: WorkflowState,
+    assignee: Option<User>,
+    team: Team,
+    labels: LabelConnection,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct LabelConnection {
+    nodes: Vec<Label>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct Label {
+    id: String,
+    name: String,
+    color: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct WorkflowState {
+    id: String,
+    name: String,
+    #[serde(rename = "type")]
+    state_type: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct User {
+    id: String,
+    name: String,
+    email: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct Team {
+    id: String,
+    name: String,
+    key: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct Project {
+    id: String,
+    name: String,
+    description: Option<String>,
+    url: String,
+    #[serde(rename = "createdAt")]
+    created_at: String,
+    state: String,
+    progress: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct IssueConnection {
+    nodes: Vec<Issue>,
+    #[serde(rename = "pageInfo")]
+    page_info: PageInfo,
+}
+
+#[derive(Debug, Deserialize)]
+struct TeamConnection {
+    nodes: Vec<Team>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProjectConnection {
+    nodes: Vec<Project>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PageInfo {
+    #[serde(rename = "hasNextPage")]
+    has_next_page: bool,
+    #[serde(rename = "endCursor")]
+    end_cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ViewerData {
+    viewer: User,
+}
+
+#[derive(Debug, Deserialize)]
+struct IssuesData {
+    issues: IssueConnection,
+}
+
+#[derive(Debug, Deserialize)]
+struct TeamsData {
+    teams: TeamConnection,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProjectsData {
+    projects: ProjectConnection,
+}
+
+#[derive(Debug, Deserialize)]
+struct IssueCreateData {
+    #[serde(rename = "issueCreate")]
+    issue_create: IssueCreatePayload,
+}
+
+#[derive(Debug, Deserialize)]
+struct IssueCreatePayload {
+    success: bool,
+    issue: Option<Issue>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProjectCreateData {
+    #[serde(rename = "projectCreate")]
+    project_create: ProjectCreatePayload,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProjectCreatePayload {
+    success: bool,
+    project: Option<Project>,
+}
+
+struct LinearClient {
+    client: reqwest::Client,
+    api_key: String,
+}
+
+impl LinearClient {
+    fn new(api_key: String) -> Self {
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_str(&api_key).expect("Invalid API key format"),
+        );
+
+        let client = reqwest::Client::builder()
+            .default_headers(headers)
+            .build()
+            .expect("Failed to create HTTP client");
+
+        Self { client, api_key }
+    }
+
+    async fn execute_query<T: for<'de> Deserialize<'de>>(
+        &self,
+        query: &str,
+        variables: Option<Value>,
+    ) -> Result<T, Box<dyn std::error::Error>> {
+        let body = match variables {
+            Some(vars) => json!({ "query": query, "variables": vars }),
+            None => json!({ "query": query }),
+        };
+
+        let response = self
+            .client
+            .post(LINEAR_API_URL)
+            .json(&body)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            return Err(format!("HTTP error: {}", response.status()).into());
+        }
+
+        let graphql_response: GraphQLResponse<T> = response.json().await?;
+
+        if let Some(errors) = graphql_response.errors {
+            let error_messages: Vec<String> = errors.iter().map(|e| e.message.clone()).collect();
+            return Err(format!("GraphQL errors: {}", error_messages.join(", ")).into());
+        }
+
+        graphql_response
+            .data
+            .ok_or("No data returned from GraphQL query".into())
+    }
+
+    async fn get_viewer(&self) -> Result<User, Box<dyn std::error::Error>> {
+        let query = r#"
+            query {
+                viewer {
+                    id
+                    name
+                    email
+                }
+            }
+        "#;
+
+        let data: ViewerData = self.execute_query(query, None).await?;
+        Ok(data.viewer)
+    }
+
+    async fn get_issues(&self, filter: Option<Value>, first: Option<i32>) -> Result<Vec<Issue>, Box<dyn std::error::Error>> {
+        let query = r#"
+            query($filter: IssueFilter, $first: Int) {
+                issues(filter: $filter, first: $first) {
+                    nodes {
+                        id
+                        title
+                        description
+                        url
+                        priority
+                        createdAt
+                        updatedAt
+                        state {
+                            id
+                            name
+                            type
+                        }
+                        assignee {
+                            id
+                            name
+                            email
+                        }
+                        team {
+                            id
+                            name
+                            key
+                        }
+                        labels {
+                            nodes {
+                                id
+                                name
+                                color
+                            }
+                        }
+                    }
+                    pageInfo {
+                        hasNextPage
+                        endCursor
+                    }
+                }
+            }
+        "#;
+
+        let variables = json!({
+            "filter": filter,
+            "first": first.unwrap_or(50)
+        });
+
+        let data: IssuesData = self.execute_query(query, Some(variables)).await?;
+        Ok(data.issues.nodes)
+    }
+
+    async fn get_teams(&self) -> Result<Vec<Team>, Box<dyn std::error::Error>> {
+        let query = r#"
+            query {
+                teams {
+                    nodes {
+                        id
+                        name
+                        key
+                    }
+                }
+            }
+        "#;
+
+        let data: TeamsData = self.execute_query(query, None).await?;
+        Ok(data.teams.nodes)
+    }
+
+    async fn get_projects(&self) -> Result<Vec<Project>, Box<dyn std::error::Error>> {
+        let query = r#"
+            query {
+                projects {
+                    nodes {
+                        id
+                        name
+                        description
+                        url
+                        createdAt
+                        state
+                        progress
+                    }
+                }
+            }
+        "#;
+
+        let data: ProjectsData = self.execute_query(query, None).await?;
+        Ok(data.projects.nodes)
+    }
+
+    async fn create_issue(
+        &self,
+        title: &str,
+        description: Option<&str>,
+        team_id: &str,
+        priority: Option<u8>,
+        assignee_id: Option<&str>,
+        label_ids: Option<Vec<&str>>,
+    ) -> Result<Issue, Box<dyn std::error::Error>> {
+        let query = r#"
+            mutation($input: IssueCreateInput!) {
+                issueCreate(input: $input) {
+                    success
+                    issue {
+                        id
+                        title
+                        description
+                        url
+                        priority
+                        createdAt
+                        updatedAt
+                        state {
+                            id
+                            name
+                            type
+                        }
+                        assignee {
+                            id
+                            name
+                            email
+                        }
+                        team {
+                            id
+                            name
+                            key
+                        }
+                        labels {
+                            nodes {
+                                id
+                                name
+                                color
+                            }
+                        }
+                    }
+                }
+            }
+        "#;
+
+        let mut input = json!({
+            "title": title,
+            "teamId": team_id
+        });
+
+        if let Some(desc) = description {
+            input["description"] = json!(desc);
+        }
+        if let Some(prio) = priority {
+            input["priority"] = json!(prio);
+        }
+        if let Some(assignee) = assignee_id {
+            input["assigneeId"] = json!(assignee);
+        }
+        if let Some(labels) = label_ids {
+            input["labelIds"] = json!(labels);
+        }
+
+        let variables = json!({ "input": input });
+
+        let data: IssueCreateData = self.execute_query(query, Some(variables)).await?;
+        
+        if !data.issue_create.success {
+            return Err("Failed to create issue".into());
+        }
+
+        data.issue_create.issue.ok_or("Issue not returned after creation".into())
+    }
+
+    async fn create_project(
+        &self,
+        name: &str,
+        description: Option<&str>,
+        team_ids: Option<Vec<&str>>,
+    ) -> Result<Project, Box<dyn std::error::Error>> {
+        let query = r#"
+            mutation($input: ProjectCreateInput!) {
+                projectCreate(input: $input) {
+                    success
+                    project {
+                        id
+                        name
+                        description
+                        url
+                        createdAt
+                        state
+                        progress
+                    }
+                }
+            }
+        "#;
+
+        let mut input = json!({ "name": name });
+
+        if let Some(desc) = description {
+            input["description"] = json!(desc);
+        }
+        if let Some(teams) = team_ids {
+            input["teamIds"] = json!(teams);
+        }
+
+        let variables = json!({ "input": input });
+
+        let data: ProjectCreateData = self.execute_query(query, Some(variables)).await?;
+        
+        if !data.project_create.success {
+            return Err("Failed to create project".into());
+        }
+
+        data.project_create.project.ok_or("Project not returned after creation".into())
+    }
+}
+
+fn load_config() -> Config {
+    let config_path = dirs::home_dir()
+        .map(|mut path| {
+            path.push(CONFIG_FILE);
+            path
+        })
+        .unwrap_or_else(|| Path::new(CONFIG_FILE).to_path_buf());
+
+    if config_path.exists() {
+        let content = fs::read_to_string(config_path).unwrap_or_default();
+        serde_json::from_str(&content).unwrap_or_default()
+    } else {
+        Config {
+            api_key: None,
+            default_team_id: None,
+        }
+    }
+}
+
+fn save_config(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
+    let config_path = dirs::home_dir()
+        .map(|mut path| {
+            path.push(CONFIG_FILE);
+            path
+        })
+        .unwrap_or_else(|| Path::new(CONFIG_FILE).to_path_buf());
+
+    let content = serde_json::to_string_pretty(config)?;
+    fs::write(config_path, content)?;
+    Ok(())
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            api_key: None,
+            default_team_id: None,
+        }
+    }
+}
+
+fn get_api_key() -> Result<String, Box<dyn std::error::Error>> {
+    // Try environment variable first
+    if let Ok(api_key) = env::var("LINEAR_API_KEY") {
+        return Ok(api_key);
+    }
+
+    // Then try config file
+    let config = load_config();
+    if let Some(api_key) = config.api_key {
+        return Ok(api_key);
+    }
+
+    Err("No API key found. Set LINEAR_API_KEY environment variable or run 'linear auth' to configure.".into())
+}
+
+fn print_issues(issues: &[Issue], format: &str) {
+    match format {
+        "json" => {
+            println!("{}", serde_json::to_string_pretty(issues).unwrap());
+        }
+        "table" => {
+            println!("{:<20} {:<60} {:<15} {:<15} {:<20}", "ID", "Title", "State", "Team", "Assignee");
+            println!("{}", "-".repeat(130));
+            for issue in issues {
+                let assignee = issue.assignee.as_ref().map(|a| a.name.as_str()).unwrap_or("Unassigned");
+                println!(
+                    "{:<20} {:<60} {:<15} {:<15} {:<20}",
+                    issue.id,
+                    truncate(&issue.title, 58),
+                    issue.state.name,
+                    issue.team.key,
+                    assignee
+                );
+            }
+        }
+        _ => {
+            for issue in issues {
+                println!("• {} - {} ({})", issue.id, issue.title, issue.state.name);
+            }
+        }
+    }
+}
+
+fn print_teams(teams: &[Team]) {
+    println!("{:<40} {:<20} {:<10}", "ID", "Name", "Key");
+    println!("{}", "-".repeat(70));
+    for team in teams {
+        println!("{:<40} {:<20} {:<10}", team.id, team.name, team.key);
+    }
+}
+
+fn print_projects(projects: &[Project]) {
+    println!("{:<40} {:<30} {:<15} {:<10}", "ID", "Name", "State", "Progress");
+    println!("{}", "-".repeat(95));
+    for project in projects {
+        println!(
+            "{:<40} {:<30} {:<15} {:<10.1}%",
+            project.id,
+            truncate(&project.name, 28),
+            project.state,
+            project.progress * 100.0
+        );
+    }
+}
+
+fn truncate(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max_len.saturating_sub(3)])
+    }
+}
+
+async fn handle_auth(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(api_key) = matches.get_one::<String>("api-key") {
+        let mut config = load_config();
+        config.api_key = Some(api_key.clone());
+        save_config(&config)?;
+        println!("API key saved successfully!");
+        
+        // Test the API key
+        let client = LinearClient::new(api_key.clone());
+        match client.get_viewer().await {
+            Ok(user) => println!("✅ Connected as: {} ({})", user.name, user.email),
+            Err(e) => println!("❌ Failed to authenticate: {}", e),
+        }
+    } else if matches.get_flag("show") {
+        let config = load_config();
+        match config.api_key {
+            Some(key) => println!("API Key: {}...{}", &key[..8], &key[key.len()-4..]),
+            None => println!("No API key configured"),
+        }
+    } else {
+        println!("Usage: linear auth --api-key <KEY> or linear auth --show");
+    }
+    Ok(())
+}
+
+async fn handle_issues(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let api_key = get_api_key()?;
+    let client = LinearClient::new(api_key);
+    
+    let format = matches.get_one::<String>("format").map(|s| s.as_str()).unwrap_or("simple");
+    let limit = matches.get_one::<String>("limit")
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(50);
+
+    let mut filter = json!({});
+
+    // Handle state filters
+    if matches.get_flag("todo") || matches.get_flag("backlog") {
+        filter["state"] = json!({"type": {"in": ["backlog", "unstarted"]}});
+    } else if matches.get_flag("triage") {
+        filter["state"] = json!({"type": {"eq": "triage"}});
+    } else if matches.get_flag("progress") || matches.get_flag("started") {
+        filter["state"] = json!({"type": {"eq": "started"}});
+    } else if matches.get_flag("done") || matches.get_flag("completed") {
+        filter["state"] = json!({"type": {"eq": "completed"}});
+    }
+
+    // Handle assignee filters
+    if matches.get_flag("mine") {
+        let viewer = client.get_viewer().await?;
+        filter["assignee"] = json!({"id": {"eq": viewer.id}});
+    } else if let Some(assignee) = matches.get_one::<String>("assignee") {
+        filter["assignee"] = json!({"email": {"eq": assignee}});
+    }
+
+    // Handle team filter
+    if let Some(team) = matches.get_one::<String>("team") {
+        filter["team"] = json!({"key": {"eq": team}});
+    }
+
+    // Handle search
+    if let Some(search) = matches.get_one::<String>("search") {
+        filter["title"] = json!({"containsIgnoreCase": search});
+    }
+
+    let filter_param = if filter.as_object().unwrap().is_empty() {
+        None
+    } else {
+        Some(filter)
+    };
+
+    let issues = client.get_issues(filter_param, Some(limit)).await?;
+    
+    if issues.is_empty() {
+        println!("No issues found matching your criteria.");
+    } else {
+        println!("Found {} issues:", issues.len());
+        print_issues(&issues, format);
+    }
+
+    Ok(())
+}
+
+async fn handle_create_issue(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let api_key = get_api_key()?;
+    let client = LinearClient::new(api_key);
+
+    let title = matches.get_one::<String>("title")
+        .ok_or("Title is required")?;
+    let description = matches.get_one::<String>("description");
+    
+    // Get team ID
+    let team_id = if let Some(team_key) = matches.get_one::<String>("team") {
+        let teams = client.get_teams().await?;
+        teams.iter()
+            .find(|t| t.key == *team_key)
+            .map(|t| t.id.clone())
+            .ok_or(format!("Team '{}' not found", team_key))?
+    } else {
+        let config = load_config();
+        config.default_team_id
+            .ok_or("No team specified and no default team configured")?
+    };
+
+    let priority = matches.get_one::<String>("priority")
+        .and_then(|p| match p.as_str() {
+            "none" | "0" => Some(0),
+            "low" | "1" => Some(1),
+            "medium" | "2" => Some(2),
+            "high" | "3" => Some(3),
+            "urgent" | "4" => Some(4),
+            _ => None,
+        });
+
+    let assignee_id = matches.get_one::<String>("assignee");
+    let label_ids: Option<Vec<&str>> = matches.get_many::<String>("labels")
+        .map(|labels| labels.map(|s| s.as_str()).collect());
+
+    let issue = client.create_issue(
+        title,
+        description.map(|s| s.as_str()),
+        &team_id,
+        priority,
+        assignee_id.map(|s| s.as_str()),
+        label_ids,
+    ).await?;
+
+    println!("✅ Issue created successfully!");
+    println!("ID: {}", issue.id);
+    println!("Title: {}", issue.title);
+    println!("URL: {}", issue.url);
+    println!("Team: {}", issue.team.name);
+
+    Ok(())
+}
+
+async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let api_key = get_api_key()?;
+    let client = LinearClient::new(api_key);
+
+    let name = matches.get_one::<String>("name")
+        .ok_or("Project name is required")?;
+    let description = matches.get_one::<String>("description");
+    
+    let team_ids: Option<Vec<&str>> = matches.get_many::<String>("teams")
+        .map(|teams| teams.map(|s| s.as_str()).collect());
+
+    let project = client.create_project(
+        name,
+        description.map(|s| s.as_str()),
+        team_ids,
+    ).await?;
+
+    println!("✅ Project created successfully!");
+    println!("ID: {}", project.id);
+    println!("Name: {}", project.name);
+    println!("URL: {}", project.url);
+
+    Ok(())
+}
+
+async fn handle_teams(_matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let api_key = get_api_key()?;
+    let client = LinearClient::new(api_key);
+
+    let teams = client.get_teams().await?;
+    
+    if teams.is_empty() {
+        println!("No teams found.");
+    } else {
+        println!("Found {} teams:", teams.len());
+        print_teams(&teams);
+    }
+
+    Ok(())
+}
+
+async fn handle_projects(_matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let api_key = get_api_key()?;
+    let client = LinearClient::new(api_key);
+
+    let projects = client.get_projects().await?;
+    
+    if projects.is_empty() {
+        println!("No projects found.");
+    } else {
+        println!("Found {} projects:", projects.len());
+        print_projects(&projects);
+    }
+
+    Ok(())
+}
+
+async fn handle_whoami(_matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let api_key = get_api_key()?;
+    let client = LinearClient::new(api_key);
+
+    let user = client.get_viewer().await?;
+    println!("Logged in as: {} ({})", user.name, user.email);
+    println!("User ID: {}", user.id);
+
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() {
+    let app = Command::new("linear")
+        .about("Linear CLI - Interact with Linear's API from the command line")
+        .version("1.0.0")
+        .subcommand_required(true)
+        .arg_required_else_help(true)
+        .subcommand(
+            Command::new("auth")
+                .about("Authenticate with Linear")
+                .arg(
+                    Arg::new("api-key")
+                        .long("api-key")
+                        .value_name("KEY")
+                        .help("Set your Linear API key")
+                        .required(false)
+                )
+                .arg(
+                    Arg::new("show")
+                        .long("show")
+                        .help("Show current API key")
+                        .action(clap::ArgAction::SetTrue)
+                )
+        )
+        .subcommand(
+            Command::new("issues")
+                .about("List and filter issues")
+                .arg(
+                    Arg::new("todo")
+                        .long("todo")
+                        .help("Show todo/backlog issues")
+                        .action(clap::ArgAction::SetTrue)
+                )
+                .arg(
+                    Arg::new("backlog")
+                        .long("backlog")
+                        .help("Show backlog issues")
+                        .action(clap::ArgAction::SetTrue)
+                )
+                .arg(
+                    Arg::new("triage")
+                        .long("triage")
+                        .help("Show issues in triage")
+                        .action(clap::ArgAction::SetTrue)
+                )
+                .arg(
+                    Arg::new("progress")
+                        .long("progress")
+                        .help("Show issues in progress")
+                        .action(clap::ArgAction::SetTrue)
+                )
+                .arg(
+                    Arg::new("started")
+                        .long("started")
+                        .help("Show started issues")
+                        .action(clap::ArgAction::SetTrue)
+                )
+                .arg(
+                    Arg::new("done")
+                        .long("done")
+                        .help("Show completed issues")
+                        .action(clap::ArgAction::SetTrue)
+                )
+                .arg(
+                    Arg::new("completed")
+                        .long("completed")
+                        .help("Show completed issues")
+                        .action(clap::ArgAction::SetTrue)
+                )
+                .arg(
+                    Arg::new("mine")
+                        .long("mine")
+                        .help("Show issues assigned to me")
+                        .action(clap::ArgAction::SetTrue)
+                )
+                .arg(
+                    Arg::new("assignee")
+                        .long("assignee")
+                        .value_name("EMAIL")
+                        .help("Filter by assignee email")
+                )
+                .arg(
+                    Arg::new("team")
+                        .long("team")
+                        .value_name("TEAM_KEY")
+                        .help("Filter by team key")
+                )
+                .arg(
+                    Arg::new("search")
+                        .long("search")
+                        .short('s')
+                        .value_name("QUERY")
+                        .help("Search in issue titles")
+                )
+                .arg(
+                    Arg::new("format")
+                        .long("format")
+                        .short('f')
+                        .value_name("FORMAT")
+                        .help("Output format: simple, table, json")
+                        .default_value("simple")
+                )
+                .arg(
+                    Arg::new("limit")
+                        .long("limit")
+                        .short('l')
+                        .value_name("NUMBER")
+                        .help("Limit number of results")
+                        .default_value("50")
+                )
+        )
+        .subcommand(
+            Command::new("create")
+                .about("Create Linear resources")
+                .subcommand_required(true)
+                .subcommand(
+                    Command::new("issue")
+                        .about("Create a new issue")
+                        .arg(
+                            Arg::new("title")
+                                .value_name("TITLE")
+                                .help("Issue title")
+                                .required(true)
+                                .index(1)
+                        )
+                        .arg(
+                            Arg::new("description")
+                                .value_name("DESCRIPTION")
+                                .help("Issue description")
+                                .index(2)
+                        )
+                        .arg(
+                            Arg::new("team")
+                                .long("team")
+                                .short('t')
+                                .value_name("TEAM_KEY")
+                                .help("Team key (e.g., ENG)")
+                        )
+                        .arg(
+                            Arg::new("priority")
+                                .long("priority")
+                                .short('p')
+                                .value_name("PRIORITY")
+                                .help("Priority: none/0, low/1, medium/2, high/3, urgent/4")
+                        )
+                        .arg(
+                            Arg::new("assignee")
+                                .long("assignee")
+                                .short('a')
+                                .value_name("USER_ID")
+                                .help("Assignee user ID")
+                        )
+                        .arg(
+                            Arg::new("labels")
+                                .long("labels")
+                                .short('l')
+                                .value_name("LABEL_ID")
+                                .help("Label IDs")
+                                .action(clap::ArgAction::Append)
+                        )
+                )
+                .subcommand(
+                    Command::new("project")
+                        .about("Create a new project")
+                        .arg(
+                            Arg::new("name")
+                                .value_name("NAME")
+                                .help("Project name")
+                                .required(true)
+                                .index(1)
+                        )
+                        .arg(
+                            Arg::new("description")
+                                .value_name("DESCRIPTION")
+                                .help("Project description")
+                                .index(2)
+                        )
+                        .arg(
+                            Arg::new("teams")
+                                .long("teams")
+                                .short('t')
+                                .value_name("TEAM_ID")
+                                .help("Team IDs")
+                                .action(clap::ArgAction::Append)
+                        )
+                )
+        )
+        .subcommand(
+            Command::new("teams")
+                .about("List teams")
+        )
+        .subcommand(
+            Command::new("projects")
+                .about("List projects")
+        )
+        .subcommand(
+            Command::new("whoami")
+                .about("Show current user information")
+        );
+
+    let matches = app.get_matches();
+
+    let result = match matches.subcommand() {
+        Some(("auth", sub_matches)) => handle_auth(sub_matches).await,
+        Some(("issues", sub_matches)) => handle_issues(sub_matches).await,
+        Some(("create", sub_matches)) => {
+            match sub_matches.subcommand() {
+                Some(("issue", issue_matches)) => handle_create_issue(issue_matches).await,
+                Some(("project", project_matches)) => handle_create_project(project_matches).await,
+                _ => {
+                    eprintln!("Unknown create subcommand. Use 'linear create --help' for available options.");
+                    process::exit(1);
+                }
+            }
+        }
+        Some(("teams", sub_matches)) => handle_teams(sub_matches).await,
+        Some(("projects", sub_matches)) => handle_projects(sub_matches).await,
+        Some(("whoami", sub_matches)) => handle_whoami(sub_matches).await,
+        _ => {
+            eprintln!("Unknown command. Use 'linear --help' for available commands.");
+            process::exit(1);
+        }
+    };
+
+    if let Err(e) = result {
+        eprintln!("Error: {}", e);
+        process::exit(1);
+    }
+}
