@@ -787,7 +787,15 @@ fn print_issues(issues: &[Issue], format: &str) {
                      "Labels".bold());
             println!("{}", "-".repeat(122));
             for issue in issues {
-                let assignee = issue.assignee.as_ref().map(|a| a.name.as_str()).unwrap_or("Unassigned");
+                let assignee = issue.assignee.as_ref()
+                    .map(|a| {
+                        if a.name.contains('@') {
+                            a.name.split('@').next().unwrap_or(&a.name)
+                        } else {
+                            a.name.split_whitespace().next().unwrap_or(&a.name)
+                        }
+                    })
+                    .unwrap_or("Unassigned");
                 let priority = match issue.priority {
                     Some(0) => "None".normal(),
                     Some(1) => "Low".blue(),
@@ -841,7 +849,14 @@ fn print_issues(issues: &[Issue], format: &str) {
                 };
                 
                 let assignee_text = if let Some(ref assignee) = issue.assignee {
-                    format!(" → {}", assignee.name).bright_black()
+                    let first_name = if assignee.name.contains('@') {
+                        // For email addresses, use the part before @
+                        assignee.name.split('@').next().unwrap_or(&assignee.name)
+                    } else {
+                        // For regular names, use the first word
+                        assignee.name.split_whitespace().next().unwrap_or(&assignee.name)
+                    };
+                    format!(" → {}", first_name).bright_black()
                 } else {
                     "".normal()
                 };
