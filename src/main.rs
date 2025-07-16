@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -830,67 +831,97 @@ fn print_issues(issues: &[Issue], format: &str) {
             }
         }
         _ => {
+            // Group issues by state
+            let mut grouped_issues: std::collections::HashMap<String, Vec<&Issue>> = std::collections::HashMap::new();
+            
             for issue in issues {
-                let state_icon = match issue.state.state_type.as_str() {
-                    "backlog" => "⏸",
-                    "unstarted" => "○",
-                    "started" => "◐",
-                    "completed" => "✓",
-                    "canceled" => "✗",
-                    _ => "•",
+                let state_key = match issue.state.state_type.as_str() {
+                    "backlog" | "unstarted" => "Todo",
+                    "started" => "In Progress",
+                    "completed" => "Done",
+                    "canceled" => "Canceled",
+                    _ => "Other",
                 };
-                
-                let priority_indicator = match issue.priority {
-                    Some(4) => " [URGENT]".red().bold(),
-                    Some(3) => " [HIGH]".bright_red(),
-                    Some(2) => " [MEDIUM]".yellow(),
-                    Some(1) => " [LOW]".blue(),
-                    _ => "".normal(),
-                };
-                
-                let assignee_text = if let Some(ref assignee) = issue.assignee {
-                    let first_name = if assignee.name.contains('@') {
-                        // For email addresses, use the part before @
-                        assignee.name.split('@').next().unwrap_or(&assignee.name)
-                    } else {
-                        // For regular names, use the first word
-                        assignee.name.split_whitespace().next().unwrap_or(&assignee.name)
-                    };
-                    format!(" → {}", first_name).bright_black()
-                } else {
-                    "".normal()
-                };
-                
-                let labels_text = if !issue.labels.nodes.is_empty() {
-                    let labels = issue.labels.nodes
-                        .iter()
-                        .map(|l| l.name.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    format!(" [{}]", labels).cyan()
-                } else {
-                    "".normal()
-                };
-                
-                println!(
-                    "{} {} - {}{}{}{}{}",
-                    state_icon,
-                    issue.identifier.bright_blue().bold(),
-                    issue.title,
-                    priority_indicator,
-                    assignee_text,
-                    labels_text,
-                    if let Some(ref desc) = issue.description {
-                        let cleaned = clean_description(desc);
-                        if !cleaned.is_empty() {
-                            format!("\n  {}", truncate(&cleaned, 80)).bright_black()
-                        } else {
-                            "".normal()
+                grouped_issues.entry(state_key.to_string()).or_default().push(issue);
+            }
+            
+            // Define the order we want to display states
+            let state_order = ["Todo", "In Progress", "Done", "Canceled", "Other"];
+            
+            for state in &state_order {
+                if let Some(state_issues) = grouped_issues.get(*state) {
+                    if !state_issues.is_empty() {
+                        // Print section header
+                        println!("\n{} {} {}", 
+                                 "━".repeat(20).bright_black(),
+                                 format!(" {} ({}) ", state, state_issues.len()).bold(),
+                                 "━".repeat(20).bright_black());
+                        println!();
+                        
+                        for issue in state_issues {
+                            let state_icon = match issue.state.state_type.as_str() {
+                                "backlog" => "⏸",
+                                "unstarted" => "○",
+                                "started" => "◐",
+                                "completed" => "✓",
+                                "canceled" => "✗",
+                                _ => "•",
+                            };
+                            
+                            let priority_indicator = match issue.priority {
+                                Some(4) => " [URGENT]".red().bold(),
+                                Some(3) => " [HIGH]".bright_red(),
+                                Some(2) => " [MEDIUM]".yellow(),
+                                Some(1) => " [LOW]".blue(),
+                                _ => "".normal(),
+                            };
+                            
+                            let assignee_text = if let Some(ref assignee) = issue.assignee {
+                                let first_name = if assignee.name.contains('@') {
+                                    // For email addresses, use the part before @
+                                    assignee.name.split('@').next().unwrap_or(&assignee.name)
+                                } else {
+                                    // For regular names, use the first word
+                                    assignee.name.split_whitespace().next().unwrap_or(&assignee.name)
+                                };
+                                format!(" → {}", first_name).bright_black()
+                            } else {
+                                "".normal()
+                            };
+                            
+                            let labels_text = if !issue.labels.nodes.is_empty() {
+                                let labels = issue.labels.nodes
+                                    .iter()
+                                    .map(|l| l.name.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                format!(" [{}]", labels).cyan()
+                            } else {
+                                "".normal()
+                            };
+                            
+                            println!(
+                                "{} {} - {}{}{}{}{}",
+                                state_icon,
+                                issue.identifier.bright_blue().bold(),
+                                issue.title,
+                                priority_indicator,
+                                assignee_text,
+                                labels_text,
+                                if let Some(ref desc) = issue.description {
+                                    let cleaned = clean_description(desc);
+                                    if !cleaned.is_empty() {
+                                        format!("\n  {}", truncate(&cleaned, 80)).bright_black()
+                                    } else {
+                                        "".normal()
+                                    }
+                                } else {
+                                    "".normal()
+                                }
+                            );
                         }
-                    } else {
-                        "".normal()
                     }
-                );
+                }
             }
         }
     }
