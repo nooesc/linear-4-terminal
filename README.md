@@ -2,6 +2,8 @@
 
 A comprehensive command-line interface for Linear's project management API, built in Rust. This tool allows you to interact with Linear from your terminal, manage issues, projects, teams, and more.
 
+![Linear CLI Demo](assets/linear-cli-demo.png)
+
 ## Features
 
 ✅ **Authentication**: Support for API keys and secure configuration  
