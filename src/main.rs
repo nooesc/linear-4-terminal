@@ -947,7 +947,7 @@ fn truncate(s: &str, max_len: usize) -> String {
 
 fn print_formatted_markdown(text: &str) {
     let mut in_code_block = false;
-    let mut code_block_content = Vec::new();
+    let mut code_block_content: Vec<String> = Vec::new();
     let mut consecutive_empty_lines = 0;
     
     for line in text.lines() {
@@ -968,11 +968,18 @@ fn print_formatted_markdown(text: &str) {
         if trimmed.starts_with("```") {
             if in_code_block {
                 // End of code block - print it
-                println!("{}", "┌─ Code ─────────────────────────────────────────────────────────────┐".bright_black());
+                println!("\n{}", "╭─ Code ─────────────────────────────────────────────────────────────╮".bright_cyan());
                 for code_line in &code_block_content {
-                    println!("{} {} {}", "│".bright_black(), format!("{:<68}", code_line).on_bright_black().black(), "│".bright_black());
+                    // Use bright_white on default background for better readability
+                    let formatted_line = if code_line.trim().is_empty() {
+                        format!("{:<68}", "")
+                    } else {
+                        format!("{:<68}", code_line)
+                    };
+                    println!("{} {} {}", "│".bright_cyan(), formatted_line.bright_white(), "│".bright_cyan());
                 }
-                println!("{}", "└────────────────────────────────────────────────────────────────────┘".bright_black());
+                println!("{}", "╰────────────────────────────────────────────────────────────────────╯".bright_cyan());
+                println!();
                 code_block_content.clear();
                 in_code_block = false;
             } else {
@@ -1041,11 +1048,17 @@ fn print_formatted_markdown(text: &str) {
     
     // Handle any remaining code block content
     if in_code_block && !code_block_content.is_empty() {
-        println!("{}", "┌─ Code ─────────────────────────────────────────────────────────────┐".bright_black());
+        println!("\n{}", "╭─ Code ─────────────────────────────────────────────────────────────╮".bright_cyan());
         for code_line in &code_block_content {
-            println!("{} {} {}", "│".bright_black(), format!("{:<68}", code_line).on_bright_black().black(), "│".bright_black());
+            let formatted_line = if code_line.trim().is_empty() {
+                format!("{:<68}", "")
+            } else {
+                format!("{:<68}", code_line)
+            };
+            println!("{} {} {}", "│".bright_cyan(), formatted_line.bright_white(), "│".bright_cyan());
         }
-        println!("{}", "└────────────────────────────────────────────────────────────────────┘".bright_black());
+        println!("{}", "╰────────────────────────────────────────────────────────────────────╯".bright_cyan());
+        println!();
     }
 }
 
@@ -1070,7 +1083,8 @@ fn format_inline_markdown(text: &str) -> String {
             let before = &result[..start];
             let code_text = &result[start + 1..start + 1 + end];
             let after = &result[start + 1 + end + 1..];
-            result = format!("{}{}{}", before, code_text.on_bright_black().black(), after);
+            // Use cyan color for inline code for better readability
+            result = format!("{}{}{}", before, code_text.cyan(), after);
         } else {
             break;
         }
