@@ -667,11 +667,15 @@ Date values support relative dates: 1hour, 2days, 1week, 1month"#)
                                 .action(clap::ArgAction::SetTrue)
                         )
                 )
-                .subcommand(
+                '''                .subcommand(
                     Command::new("hook")
                         .about("Git hook integration (for commit-msg hook)")
                 )
-        );
+                .subcommand(
+                    Command::new("install-hook")
+                        .about("Install the commit-msg git hook")
+                )
+        );'';
 
     let matches = app.get_matches();
 
@@ -735,6 +739,7 @@ Date values support relative dates: 1hour, 2days, 1week, 1month"#)
                 Some(("branch", git_matches)) => handle_git_branch(git_matches).await,
                 Some(("pr", git_matches)) => handle_git_pr(git_matches).await,
                 Some(("hook", git_matches)) => handle_git_hook(git_matches).await,
+                Some(("install-hook", git_matches)) => handle_install_hook(git_matches).await,
                 _ => unreachable!("Subcommand required"),
             }
         }

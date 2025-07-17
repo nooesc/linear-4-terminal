@@ -1,3 +1,4 @@
+use std::os::unix::fs::PermissionsExt;
 use clap::ArgMatches;
 use colored::*;
 use regex::Regex;
@@ -257,6 +258,53 @@ pub async fn handle_git_hook(_matches: &ArgMatches) -> Result<(), Box<dyn std::e
         }
     }
     
+    Ok(())
+}
+
+pub async fn handle_install_hook(_matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let git_dir = Command::new("git")
+        .args(&["rev-parse", "--git-dir"])
+        .output()?;
+
+    if !git_dir.status.success() {
+        return Err("Not a git repository".into());
+    }
+
+    let git_dir_path = String::from_utf8_lossy(&git_dir.stdout).trim().to_string();
+    let hooks_path = std::path::Path::new(&git_dir_path).join("hooks");
+    let commit_msg_hook_path = hooks_path.join("commit-msg");
+
+    // Create hooks directory if it doesn't exist
+    if !hooks_path.exists() {
+        std::fs::create_dir_all(&hooks_path)?;
+    }
+
+    let hook_script = r##"#!/bin/sh
+#
+# Automatically update Linear issue status from commit message.
+# Installed by `linear git install-hook`
+
+# Read commit message from the file passed as the first argument
+COMMIT_MSG_FILE=$1
+COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
+
+# Check if the linear CLI is in the PATH
+if ! command -v linear >/dev/null 2>&1; then
+    echo "linear-cli not found in PATH"
+    exit 1
+fi
+
+# Call the linear git hook command with the commit message
+echo "$COMMIT_MSG" | linear git hook
+"##;
+
+    std::fs::write(&commit_msg_hook_path, hook_script)?;
+    std::fs::set_permissions(&commit_msg_hook_path, std::fs::Permissions::from_mode(0o755))?;
+
+    println!("✅ commit-msg hook installed successfully at: {:?}", commit_msg_hook_path);
+    println!("You can now automatically update Linear issues by mentioning them in your commit messages.");
+    println!("Example: `git commit -m \"Fixes ENG-123: Implement the new feature\"`");
+
     Ok(())
 }
 

@@ -38,6 +38,7 @@ We're actively working on expanding the Linear CLI with powerful new features. H
 - ✅ **Comments Management**: Full CRUD operations for issue comments
 - ✅ **Bulk Operations**: Batch update, move, and archive issues
 - ✅ **Advanced Search**: Query language with operators and saved searches
+- ✅ **Git Integration**: Create commits, branches, and PRs linked to Linear issues
 
 ### 📋 Planned Features (Priority Order)
 
@@ -53,36 +54,30 @@ We're actively working on expanding the Linear CLI with powerful new features. H
    - Visualize dependency chains
    - Block/unblock workflows
 
-3. **Git Integration**
-   - Create commits with issue references
-   - Link PRs to issues
-   - Update issue status from git hooks
-   - Branch naming conventions
-
-4. **Time Tracking & Estimates**
+3. **Time Tracking & Estimates**
    - Log time on issues
    - Set and track estimates
    - Time reports and summaries
    - Velocity calculations
 
-5. **Advanced Reporting**
+4. **Advanced Reporting**
    - Daily/weekly standup reports
    - Team workload analysis
    - Progress tracking dashboards
    - Custom report generation
 
 #### Low Priority
-6. **Shell Completion**
+5. **Shell Completion**
    - Bash, Zsh, Fish completions
    - Context-aware suggestions
    - Command aliases
 
-7. **Interactive Mode**
+6. **Interactive Mode**
    - Menu-driven interface
    - Guided workflows
    - Issue templates
 
-8. **Offline Mode**
+7. **Offline Mode**
    - Queue changes when offline
    - Automatic sync on reconnection
    - Conflict resolution
@@ -363,6 +358,75 @@ linear bulk archive INF-30,INF-31,INF-32
 # Update with labels
 linear bulk update INF-40,INF-41 --labels label1,label2 --remove-labels old_label
 ```
+
+### Git Integration (v2)
+
+The Linear CLI provides seamless Git integration to link your commits, branches, and pull requests with Linear issues.
+
+#### Create Branches from Issues
+
+```bash
+# Create a feature branch from a Linear issue
+linear git branch INF-36
+# Creates: feature/inf-36-fix-authentication-bug
+
+# Use a different branch prefix
+linear git branch INF-36 --prefix bugfix
+# Creates: bugfix/inf-36-fix-authentication-bug
+```
+
+#### Commit with Issue References
+
+```bash
+# Commit with explicit issue reference
+linear git commit "Fix null pointer exception" --issue INF-36
+# Creates commit: "INF-36: Fix null pointer exception"
+
+# Auto-detect issue from commit message
+linear git commit "Fix issue with INF-36 authentication"
+# Issue ID is automatically detected
+
+# Commit and push in one command
+linear git commit "Add user validation" --issue INF-36 --push
+
+# Update Linear issue status after commit
+linear git commit "Implement login flow" --issue INF-36 --update-status --status "In Progress"
+```
+
+#### Create Pull Requests
+
+```bash
+# Create a PR linked to the Linear issue (auto-detects from branch name)
+linear git pr
+
+# Custom PR title and body
+linear git pr --title "Fix: Authentication flow" --body "Resolves login issues"
+
+# Create as draft
+linear git pr --draft
+
+# Open in browser after creation
+linear git pr --web
+```
+
+#### Git Hooks Integration
+
+Set up a commit-msg hook to automatically update Linear issues based on commit messages:
+
+```bash
+# Create the hook file
+cat > .git/hooks/commit-msg << 'EOF'
+#!/bin/sh
+linear git hook < $1
+EOF
+
+# Make it executable
+chmod +x .git/hooks/commit-msg
+```
+
+Now your commits will automatically update Linear issues:
+- Commits with "fixes", "closes", or "resolves" will mark issues as Done
+- Commits with "wip" or "in progress" will mark issues as In Progress
 
 ### View Single Issue Details
 
