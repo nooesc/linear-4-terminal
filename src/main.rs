@@ -1924,21 +1924,41 @@ async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn std::
         .ok_or("Project name is required")?;
     let description = matches.get_one::<String>("description");
     
-    let team_ids: Option<Vec<&str>> = matches.get_many::<String>("teams")
-        .map(|teams| teams.map(|s| s.as_str()).collect());
+    let mut team_ids: Vec<String> = matches.get_many::<String>("teams")
+        .map(|teams| teams.cloned().collect())
+        .unwrap_or_else(Vec::new);
 
-    let project = client.create_project(
+    // If no teams specified, get the first available team
+    if team_ids.is_empty() {
+        let teams = client.get_teams().await?;
+        if teams.is_empty() {
+            return Err("No teams found. Projects require at least one team.".into());
+        }
+        eprintln!("No team specified. Using default team: {} ({})", teams[0].name, teams[0].key);
+        team_ids.push(teams[0].id.clone());
+    }
+
+    let team_refs: Vec<&str> = team_ids.iter().map(|s| s.as_str()).collect();
+
+    match client.create_project(
         name,
         description.map(|s| s.as_str()),
-        team_ids,
-    ).await?;
-
-    println!("✅ Project created successfully!");
-    println!("ID: {}", project.id);
-    println!("Name: {}", project.name);
-    println!("URL: {}", project.url);
-
-    Ok(())
+        Some(team_refs),
+    ).await {
+        Ok(project) => {
+            println!("✅ Project created successfully!");
+            println!("ID: {}", project.id);
+            println!("Name: {}", project.name);
+            println!("URL: {}", project.url);
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("Failed to create project: {}", e);
+            eprintln!("\nTip: Projects require at least one team. Use --teams flag with team ID.");
+            eprintln!("Run 'linear teams' to see available teams.");
+            Err(e)
+        }
+    }
 }
 
 async fn handle_issue(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
