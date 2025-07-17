@@ -20,6 +20,9 @@ A fast, powerful terminal client for Linear project management. Access Linear's 
 ## Key Features
 
 ✅ **Full Linear API Access**: Create, read, update, and delete issues and projects  
+✅ **Advanced Search & Filtering**: Powerful query language with field operators and saved searches  
+✅ **Bulk Operations**: Update, move, or archive multiple issues at once  
+✅ **Comments Management**: Full CRUD operations on issue comments with markdown support  
 ✅ **Smart Filtering**: Filter by status, assignee, team, priority, or search text  
 ✅ **Beautiful Output**: Color-coded terminal display with status grouping  
 ✅ **Multiple Formats**: Export to JSON, table view, or simple text  
@@ -230,6 +233,77 @@ linear teams
 linear whoami
 ```
 
+### Advanced Search and Filtering (v2)
+
+```bash
+# Use advanced filter queries
+linear issues -f "assignee:john@example.com AND priority:>2"
+linear issues -f "title:~bug AND created:>1week"
+linear issues -f "has-label:urgent AND state:started"
+linear issues -f "no-assignee AND updated:<2days"
+
+# Available operators
+# : (equals), :> (greater than), :< (less than)
+# :~ (contains), :!= (not equals), :in (in list)
+# Special: has-assignee, no-assignee, has-label:name, no-label
+
+# Save frequently used searches
+linear search save high-priority "priority:>2 AND state:started"
+linear search save my-urgent "assignee:me AND priority:urgent"
+linear search save recent-bugs "title:~bug AND created:<1week"
+
+# List saved searches
+linear search list
+
+# Run a saved search
+linear search run high-priority
+linear search run my-urgent --format table
+
+# Delete a saved search
+linear search delete high-priority
+```
+
+### Comments Management (v2)
+
+```bash
+# List all comments on an issue
+linear comment list INF-36
+
+# Add a comment to an issue
+linear comment add INF-36 "This is looking good, just needs tests"
+
+# Update an existing comment
+linear comment update comment_id "Updated comment text"
+
+# Delete a comment
+linear comment delete comment_id
+```
+
+### Bulk Operations (v2)
+
+```bash
+# Update multiple issues at once
+linear bulk update INF-1,INF-2,INF-3 --state done
+linear bulk update INF-4 INF-5 --assignee john@example.com --priority high
+
+# Move multiple issues to a different team/project
+linear bulk move INF-10,INF-11,INF-12 --team ENG
+linear bulk move INF-20 INF-21 --project project_id
+
+# Archive multiple issues
+linear bulk archive INF-30,INF-31,INF-32
+
+# Update with labels
+linear bulk update INF-40,INF-41 --labels label1,label2 --remove-labels old_label
+```
+
+### View Single Issue Details
+
+```bash
+# Get comprehensive details about a specific issue
+linear issue INF-36
+```
+
 ## Output Formats
 
 The CLI supports multiple output formats:
@@ -382,6 +456,8 @@ This CLI covers the major Linear API operations:
 - ✅ List teams
 - ✅ List projects
 - ✅ Search functionality
+- ✅ View single issue details
+- ✅ List comments on issues
 
 ### Mutations
 - ✅ Create issues
@@ -389,13 +465,23 @@ This CLI covers the major Linear API operations:
 - ✅ Update issues
 - ✅ Update projects
 - ✅ Delete operations (archive)
+- ✅ Create comments
+- ✅ Update comments
+- ✅ Delete comments
+- ✅ Bulk update issues
+- ✅ Bulk move issues
+- ✅ Bulk archive issues
 
-### Filters
+### Filters & Search
 - ✅ State-based filtering (todo, triage, progress, done)
 - ✅ Assignee filtering
 - ✅ Team filtering
 - ✅ Search/text filtering
 - ✅ Pagination with limits
+- ✅ Advanced query language with operators
+- ✅ Field-specific filters (priority, created, updated, labels)
+- ✅ Relative date filtering
+- ✅ Saved searches
 
 ## Troubleshooting
 
@@ -427,18 +513,81 @@ This CLI covers the major Linear API operations:
 
 For debugging, you can inspect the API calls by modifying the code to add debug logging or use tools like `RUST_LOG=debug cargo run`.
 
+## Future Plans & Roadmap
+
+We're actively working on expanding the Linear CLI with powerful new features. Here's what's coming:
+
+### 🚧 In Development (v2)
+- ✅ **Comments Management**: Full CRUD operations for issue comments
+- ✅ **Bulk Operations**: Batch update, move, and archive issues
+- ✅ **Advanced Search**: Query language with operators and saved searches
+
+### 📋 Planned Features (Priority Order)
+
+#### Medium Priority
+1. **Sprint/Cycle Management**
+   - Create and manage sprints/cycles
+   - Sprint planning and burndown charts
+   - Add/remove issues from sprints
+   - Sprint progress tracking
+
+2. **Issue Dependencies & Relationships**
+   - Link related issues, blockers, and dependencies
+   - Visualize dependency chains
+   - Block/unblock workflows
+
+3. **Git Integration**
+   - Create commits with issue references
+   - Link PRs to issues
+   - Update issue status from git hooks
+   - Branch naming conventions
+
+4. **Time Tracking & Estimates**
+   - Log time on issues
+   - Set and track estimates
+   - Time reports and summaries
+   - Velocity calculations
+
+5. **Advanced Reporting**
+   - Daily/weekly standup reports
+   - Team workload analysis
+   - Progress tracking dashboards
+   - Custom report generation
+
+#### Low Priority
+6. **Shell Completion**
+   - Bash, Zsh, Fish completions
+   - Context-aware suggestions
+   - Command aliases
+
+7. **Interactive Mode**
+   - Menu-driven interface
+   - Guided workflows
+   - Issue templates
+
+8. **Offline Mode**
+   - Queue changes when offline
+   - Automatic sync on reconnection
+   - Conflict resolution
+
+### 🎯 Long-term Vision
+
+- **Plugin System**: Extend functionality with custom plugins
+- **Webhook Integration**: React to Linear events
+- **AI Assistant**: Natural language commands
+- **Mobile Companion**: CLI commands from mobile
+- **Team Analytics**: Advanced metrics and insights
+
 ## Contributing
 
-Contributions are welcome! This Linear terminal client can be extended with:
+Contributions are welcome! Check our [roadmap](#future-plans--roadmap) above to see what we're working on.
 
-- Comment management for Linear issues
-- Label and milestone management  
-- Advanced search queries
-- Shell completion scripts
-- Batch operations for multiple issues
-- Interactive mode for guided workflows
-
-See [issues](https://github.com/colerafiz/linear-4-terminal/issues) for planned features.
+Ways to contribute:
+- Pick a feature from the roadmap
+- Report bugs or suggest features in [issues](https://github.com/colerafiz/linear-4-terminal/issues)
+- Improve documentation
+- Add tests
+- Share feedback and use cases
 
 ## Related Projects and Alternatives
 
