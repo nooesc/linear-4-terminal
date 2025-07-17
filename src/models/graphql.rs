@@ -24,11 +24,13 @@ pub struct IssuesData {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct IssueWithComments {
     pub issue: super::Issue,
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct CommentsData {
     pub comments: super::Connection<super::Comment>,
 }
