@@ -570,6 +570,107 @@ Date values support relative dates: 1hour, 2days, 1week, 1month"#)
                                 .index(1)
                         )
                 )
+        )
+        .subcommand(
+            Command::new("git")
+                .about("Git integration with Linear")
+                .subcommand_required(true)
+                .arg_required_else_help(true)
+                .subcommand(
+                    Command::new("commit")
+                        .about("Create a commit with Linear issue reference")
+                        .arg(
+                            Arg::new("message")
+                                .value_name("MESSAGE")
+                                .help("Commit message")
+                                .required(true)
+                                .index(1)
+                        )
+                        .arg(
+                            Arg::new("issue")
+                                .short('i')
+                                .long("issue")
+                                .value_name("ISSUE_ID")
+                                .help("Linear issue ID (e.g., ENG-123)")
+                        )
+                        .arg(
+                            Arg::new("push")
+                                .short('p')
+                                .long("push")
+                                .help("Push after committing")
+                                .action(clap::ArgAction::SetTrue)
+                        )
+                        .arg(
+                            Arg::new("update-status")
+                                .short('u')
+                                .long("update-status")
+                                .help("Update Linear issue status")
+                                .action(clap::ArgAction::SetTrue)
+                        )
+                        .arg(
+                            Arg::new("status")
+                                .short('s')
+                                .long("status")
+                                .value_name("STATE")
+                                .help("New status for the issue")
+                                .requires("update-status")
+                        )
+                )
+                .subcommand(
+                    Command::new("branch")
+                        .about("Create a branch from a Linear issue")
+                        .arg(
+                            Arg::new("issue")
+                                .value_name("ISSUE_ID")
+                                .help("Linear issue ID (e.g., ENG-123)")
+                                .required(true)
+                                .index(1)
+                        )
+                        .arg(
+                            Arg::new("prefix")
+                                .short('p')
+                                .long("prefix")
+                                .value_name("PREFIX")
+                                .help("Branch prefix (default: feature)")
+                                .default_value("feature")
+                        )
+                )
+                .subcommand(
+                    Command::new("pr")
+                        .about("Create a pull request linked to Linear issue")
+                        .arg(
+                            Arg::new("title")
+                                .short('t')
+                                .long("title")
+                                .value_name("TITLE")
+                                .help("PR title (defaults to issue title)")
+                        )
+                        .arg(
+                            Arg::new("body")
+                                .short('b')
+                                .long("body")
+                                .value_name("BODY")
+                                .help("PR body (defaults to issue description)")
+                        )
+                        .arg(
+                            Arg::new("draft")
+                                .short('d')
+                                .long("draft")
+                                .help("Create as draft PR")
+                                .action(clap::ArgAction::SetTrue)
+                        )
+                        .arg(
+                            Arg::new("web")
+                                .short('w')
+                                .long("web")
+                                .help("Open PR in web browser")
+                                .action(clap::ArgAction::SetTrue)
+                        )
+                )
+                .subcommand(
+                    Command::new("hook")
+                        .about("Git hook integration (for commit-msg hook)")
+                )
         );
 
     let matches = app.get_matches();
@@ -625,6 +726,15 @@ Date values support relative dates: 1hour, 2days, 1week, 1month"#)
                 Some(("add", comment_matches)) => handle_add_comment(comment_matches).await,
                 Some(("update", comment_matches)) => handle_update_comment(comment_matches).await,
                 Some(("delete", comment_matches)) => handle_delete_comment(comment_matches).await,
+                _ => unreachable!("Subcommand required"),
+            }
+        }
+        Some(("git", sub_matches)) => {
+            match sub_matches.subcommand() {
+                Some(("commit", git_matches)) => handle_git_commit(git_matches).await,
+                Some(("branch", git_matches)) => handle_git_branch(git_matches).await,
+                Some(("pr", git_matches)) => handle_git_pr(git_matches).await,
+                Some(("hook", git_matches)) => handle_git_hook(git_matches).await,
                 _ => unreachable!("Subcommand required"),
             }
         }
