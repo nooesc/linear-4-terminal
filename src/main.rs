@@ -2,6 +2,7 @@ use std::env;
 use std::fs;
 use std::path::Path;
 use std::process;
+use std::collections::HashMap;
 use colored::*;
 
 use clap::{Arg, ArgMatches, Command};
@@ -9,6 +10,7 @@ use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio;
+use regex::Regex;
 
 const LINEAR_API_URL: &str = "https://api.linear.app/graphql";
 const CONFIG_FILE: &str = ".linear-cli-config.json";
@@ -73,6 +75,8 @@ const COMMENT_FIELDS: &str = r#"
 struct Config {
     api_key: Option<String>,
     default_team_id: Option<String>,
+    #[serde(default)]
+    saved_searches: HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -779,6 +783,244 @@ impl LinearClient {
     }
 }
 
+// Advanced filter parsing
+#[derive(Debug, Clone)]
+struct FilterQuery {
+    field: String,
+    operator: FilterOperator,
+    value: String,
+}
+
+#[derive(Debug, Clone)]
+enum FilterOperator {
+    Equals,
+    NotEquals,
+    Contains,
+    NotContains,
+    GreaterThan,
+    LessThan,
+    In,
+    NotIn,
+    HasLabel,
+    NoLabel,
+    HasAssignee,
+    NoAssignee,
+}
+
+fn parse_filter_query(query: &str) -> Result<Vec<FilterQuery>, String> {
+    let mut filters = Vec::new();
+    
+    // Split by AND (we'll add OR support later)
+    let parts: Vec<&str> = query.split(" AND ").collect();
+    
+    for part in parts {
+        let filter = if let Some((field, value)) = part.split_once(":>") {
+            FilterQuery {
+                field: field.trim().to_lowercase(),
+                operator: FilterOperator::GreaterThan,
+                value: value.trim().to_string(),
+            }
+        } else if let Some((field, value)) = part.split_once(":<") {
+            FilterQuery {
+                field: field.trim().to_lowercase(),
+                operator: FilterOperator::LessThan,
+                value: value.trim().to_string(),
+            }
+        } else if let Some((field, value)) = part.split_once(":!=") {
+            FilterQuery {
+                field: field.trim().to_lowercase(),
+                operator: FilterOperator::NotEquals,
+                value: value.trim().to_string(),
+            }
+        } else if let Some((field, value)) = part.split_once(":~") {
+            FilterQuery {
+                field: field.trim().to_lowercase(),
+                operator: FilterOperator::Contains,
+                value: value.trim().to_string(),
+            }
+        } else if let Some((field, value)) = part.split_once(":!~") {
+            FilterQuery {
+                field: field.trim().to_lowercase(),
+                operator: FilterOperator::NotContains,
+                value: value.trim().to_string(),
+            }
+        } else if let Some((field, value)) = part.split_once(":in") {
+            FilterQuery {
+                field: field.trim().to_lowercase(),
+                operator: FilterOperator::In,
+                value: value.trim().to_string(),
+            }
+        } else if let Some((field, value)) = part.split_once(":not-in") {
+            FilterQuery {
+                field: field.trim().to_lowercase(),
+                operator: FilterOperator::NotIn,
+                value: value.trim().to_string(),
+            }
+        } else if let Some((field, value)) = part.split_once(':') {
+            FilterQuery {
+                field: field.trim().to_lowercase(),
+                operator: FilterOperator::Equals,
+                value: value.trim().to_string(),
+            }
+        } else if part.trim() == "has-assignee" {
+            FilterQuery {
+                field: "assignee".to_string(),
+                operator: FilterOperator::HasAssignee,
+                value: String::new(),
+            }
+        } else if part.trim() == "no-assignee" {
+            FilterQuery {
+                field: "assignee".to_string(),
+                operator: FilterOperator::NoAssignee,
+                value: String::new(),
+            }
+        } else if part.trim().starts_with("has-label:") {
+            let label = part.trim().strip_prefix("has-label:").unwrap().trim();
+            FilterQuery {
+                field: "label".to_string(),
+                operator: FilterOperator::HasLabel,
+                value: label.to_string(),
+            }
+        } else if part.trim() == "no-label" {
+            FilterQuery {
+                field: "label".to_string(),
+                operator: FilterOperator::NoLabel,
+                value: String::new(),
+            }
+        } else {
+            return Err(format!("Invalid filter syntax: {}", part));
+        };
+        
+        filters.push(filter);
+    }
+    
+    Ok(filters)
+}
+
+fn build_graphql_filter(filters: Vec<FilterQuery>) -> Value {
+    let mut filter = json!({});
+    
+    for query in filters {
+        match query.field.as_str() {
+            "assignee" => match query.operator {
+                FilterOperator::Equals => {
+                    filter["assignee"] = json!({"email": {"eq": query.value}});
+                }
+                FilterOperator::HasAssignee => {
+                    filter["assignee"] = json!({"null": false});
+                }
+                FilterOperator::NoAssignee => {
+                    filter["assignee"] = json!({"null": true});
+                }
+                _ => {}
+            },
+            "state" => match query.operator {
+                FilterOperator::Equals => {
+                    filter["state"] = json!({"name": {"eq": query.value}});
+                }
+                FilterOperator::In => {
+                    let states: Vec<&str> = query.value.split(',').map(|s| s.trim()).collect();
+                    filter["state"] = json!({"name": {"in": states}});
+                }
+                _ => {}
+            },
+            "priority" => match query.operator {
+                FilterOperator::Equals => {
+                    if let Ok(priority) = query.value.parse::<u8>() {
+                        filter["priority"] = json!({"eq": priority});
+                    }
+                }
+                FilterOperator::GreaterThan => {
+                    if let Ok(priority) = query.value.parse::<u8>() {
+                        filter["priority"] = json!({"gt": priority});
+                    }
+                }
+                FilterOperator::LessThan => {
+                    if let Ok(priority) = query.value.parse::<u8>() {
+                        filter["priority"] = json!({"lt": priority});
+                    }
+                }
+                _ => {}
+            },
+            "title" => match query.operator {
+                FilterOperator::Contains => {
+                    filter["title"] = json!({"containsIgnoreCase": query.value});
+                }
+                FilterOperator::Equals => {
+                    filter["title"] = json!({"eq": query.value});
+                }
+                _ => {}
+            },
+            "description" => match query.operator {
+                FilterOperator::Contains => {
+                    filter["description"] = json!({"containsIgnoreCase": query.value});
+                }
+                _ => {}
+            },
+            "label" => match query.operator {
+                FilterOperator::HasLabel => {
+                    filter["labels"] = json!({"some": {"name": {"eq": query.value}}});
+                }
+                FilterOperator::NoLabel => {
+                    filter["labels"] = json!({"every": {"name": {"neq": ""}}});
+                }
+                _ => {}
+            },
+            "created" => match query.operator {
+                FilterOperator::GreaterThan => {
+                    // Parse relative time like "1week", "3days", "2hours"
+                    if let Some(date) = parse_relative_date(&query.value) {
+                        filter["createdAt"] = json!({"gt": date});
+                    }
+                }
+                FilterOperator::LessThan => {
+                    if let Some(date) = parse_relative_date(&query.value) {
+                        filter["createdAt"] = json!({"lt": date});
+                    }
+                }
+                _ => {}
+            },
+            "updated" => match query.operator {
+                FilterOperator::GreaterThan => {
+                    if let Some(date) = parse_relative_date(&query.value) {
+                        filter["updatedAt"] = json!({"gt": date});
+                    }
+                }
+                FilterOperator::LessThan => {
+                    if let Some(date) = parse_relative_date(&query.value) {
+                        filter["updatedAt"] = json!({"lt": date});
+                    }
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+    
+    filter
+}
+
+fn parse_relative_date(input: &str) -> Option<String> {
+    use chrono::{Utc, Duration};
+    
+    let re = Regex::new(r"^(\d+)(hour|day|week|month)s?$").ok()?;
+    let captures = re.captures(input)?;
+    
+    let amount: i64 = captures.get(1)?.as_str().parse().ok()?;
+    let unit = captures.get(2)?.as_str();
+    
+    let duration = match unit {
+        "hour" => Duration::hours(amount),
+        "day" => Duration::days(amount),
+        "week" => Duration::weeks(amount),
+        "month" => Duration::days(amount * 30), // Approximate
+        _ => return None,
+    };
+    
+    let date = Utc::now() - duration;
+    Some(date.to_rfc3339())
+}
+
 fn load_config() -> Config {
     let config_path = dirs::home_dir()
         .map(|mut path| {
@@ -794,6 +1036,7 @@ fn load_config() -> Config {
         Config {
             api_key: None,
             default_team_id: None,
+            saved_searches: HashMap::new(),
         }
     }
 }
@@ -816,6 +1059,7 @@ impl Default for Config {
         Self {
             api_key: None,
             default_team_id: None,
+            saved_searches: HashMap::new(),
         }
     }
 }
@@ -1554,34 +1798,50 @@ async fn handle_issues(matches: &ArgMatches) -> Result<(), Box<dyn std::error::E
         .unwrap_or(50);
 
     let mut filter = json!({});
+    
+    // Check if advanced filter is provided
+    if let Some(filter_query) = matches.get_one::<String>("filter") {
+        // Parse and apply advanced filter
+        match parse_filter_query(filter_query) {
+            Ok(filters) => {
+                filter = build_graphql_filter(filters);
+            }
+            Err(e) => {
+                eprintln!("Error parsing filter: {}", e);
+                eprintln!("Use --help to see filter syntax examples");
+                return Err(e.into());
+            }
+        }
+    } else {
+        // Handle legacy filters for backward compatibility
+        // Handle state filters
+        if matches.get_flag("todo") || matches.get_flag("backlog") {
+            filter["state"] = json!({"type": {"in": ["backlog", "unstarted"]}});
+        } else if matches.get_flag("triage") {
+            filter["state"] = json!({"type": {"eq": "triage"}});
+        } else if matches.get_flag("progress") || matches.get_flag("started") {
+            filter["state"] = json!({"type": {"eq": "started"}});
+        } else if matches.get_flag("done") || matches.get_flag("completed") {
+            filter["state"] = json!({"type": {"eq": "completed"}});
+        }
 
-    // Handle state filters
-    if matches.get_flag("todo") || matches.get_flag("backlog") {
-        filter["state"] = json!({"type": {"in": ["backlog", "unstarted"]}});
-    } else if matches.get_flag("triage") {
-        filter["state"] = json!({"type": {"eq": "triage"}});
-    } else if matches.get_flag("progress") || matches.get_flag("started") {
-        filter["state"] = json!({"type": {"eq": "started"}});
-    } else if matches.get_flag("done") || matches.get_flag("completed") {
-        filter["state"] = json!({"type": {"eq": "completed"}});
-    }
+        // Handle assignee filters
+        if matches.get_flag("mine") {
+            let viewer = client.get_viewer().await?;
+            filter["assignee"] = json!({"id": {"eq": viewer.id}});
+        } else if let Some(assignee) = matches.get_one::<String>("assignee") {
+            filter["assignee"] = json!({"email": {"eq": assignee}});
+        }
 
-    // Handle assignee filters
-    if matches.get_flag("mine") {
-        let viewer = client.get_viewer().await?;
-        filter["assignee"] = json!({"id": {"eq": viewer.id}});
-    } else if let Some(assignee) = matches.get_one::<String>("assignee") {
-        filter["assignee"] = json!({"email": {"eq": assignee}});
-    }
+        // Handle team filter
+        if let Some(team) = matches.get_one::<String>("team") {
+            filter["team"] = json!({"key": {"eq": team}});
+        }
 
-    // Handle team filter
-    if let Some(team) = matches.get_one::<String>("team") {
-        filter["team"] = json!({"key": {"eq": team}});
-    }
-
-    // Handle search
-    if let Some(search) = matches.get_one::<String>("search") {
-        filter["title"] = json!({"containsIgnoreCase": search});
+        // Handle search
+        if let Some(search) = matches.get_one::<String>("search") {
+            filter["title"] = json!({"containsIgnoreCase": search});
+        }
     }
 
     let filter_param = if filter.as_object().unwrap().is_empty() {
@@ -1952,6 +2212,118 @@ async fn handle_bulk_archive(matches: &ArgMatches) -> Result<(), Box<dyn std::er
     Ok(())
 }
 
+async fn handle_save_search(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let name = matches.get_one::<String>("name")
+        .ok_or("Search name is required")?;
+    let query = matches.get_one::<String>("query")
+        .ok_or("Search query is required")?;
+    
+    // Validate the query
+    match parse_filter_query(query) {
+        Ok(_) => {
+            let mut config = load_config();
+            config.saved_searches.insert(name.clone(), query.clone());
+            save_config(&config)?;
+            
+            println!("✅ Saved search '{}' successfully!", name);
+            println!("Query: {}", query);
+            println!("\nRun it with: linear search run {}", name);
+        }
+        Err(e) => {
+            eprintln!("Error: Invalid filter query - {}", e);
+            eprintln!("Use 'linear issues --help' to see filter syntax examples");
+            return Err(e.into());
+        }
+    }
+    
+    Ok(())
+}
+
+async fn handle_list_searches() -> Result<(), Box<dyn std::error::Error>> {
+    let config = load_config();
+    
+    if config.saved_searches.is_empty() {
+        println!("No saved searches found.");
+        println!("\nSave a search with: linear search save <name> <query>");
+    } else {
+        println!("Saved searches:");
+        println!("{}", "─".repeat(80));
+        
+        let mut searches: Vec<_> = config.saved_searches.iter().collect();
+        searches.sort_by_key(|(name, _)| name.as_str());
+        
+        for (name, query) in searches {
+            println!("\n{} {}", "▸".bright_blue(), name.bright_cyan().bold());
+            println!("  Query: {}", query);
+            println!("  Run: linear search run {}", name);
+        }
+    }
+    
+    Ok(())
+}
+
+async fn handle_delete_search(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let name = matches.get_one::<String>("name")
+        .ok_or("Search name is required")?;
+    
+    let mut config = load_config();
+    
+    if config.saved_searches.remove(name).is_some() {
+        save_config(&config)?;
+        println!("✅ Deleted saved search '{}'", name);
+    } else {
+        println!("❌ Saved search '{}' not found", name);
+    }
+    
+    Ok(())
+}
+
+async fn handle_run_search(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let name = matches.get_one::<String>("name")
+        .ok_or("Search name is required")?;
+    
+    let config = load_config();
+    let query = config.saved_searches.get(name)
+        .ok_or(format!("Saved search '{}' not found", name))?;
+    
+    println!("Running saved search '{}': {}", name.bright_cyan(), query);
+    println!("{}", "─".repeat(80));
+    
+    // Parse and execute the search
+    let api_key = get_api_key()?;
+    let client = LinearClient::new(api_key);
+    
+    let format = matches.get_one::<String>("format").map(|s| s.as_str()).unwrap_or("simple");
+    let limit = matches.get_one::<String>("limit")
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(50);
+    
+    match parse_filter_query(query) {
+        Ok(filters) => {
+            let filter = build_graphql_filter(filters);
+            let filter_param = if filter.as_object().unwrap().is_empty() {
+                None
+            } else {
+                Some(filter)
+            };
+            
+            let issues = client.get_issues(filter_param, Some(limit)).await?;
+            
+            if issues.is_empty() {
+                println!("No issues found matching your saved search.");
+            } else {
+                print_issues(&issues, format);
+            }
+        }
+        Err(e) => {
+            eprintln!("Error parsing saved search: {}", e);
+            return Err(e.into());
+        }
+    }
+    
+    Ok(())
+}
+
 async fn handle_update_issue(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let api_key = get_api_key()?;
     let client = LinearClient::new(api_key);
@@ -2193,9 +2565,28 @@ async fn main() {
                         .help("Search in issue titles")
                 )
                 .arg(
+                    Arg::new("filter")
+                        .long("filter")
+                        .short('f')
+                        .value_name("QUERY")
+                        .help("Advanced filter query (e.g., 'assignee:john AND priority:>2 AND created:>1week')")
+                        .long_help(
+                            "Advanced filter syntax:\n\
+                            - Operators: : (equals), :> (greater than), :< (less than), :~ (contains), :!= (not equals)\n\
+                            - Fields: assignee, state, priority, title, description, created, updated, label\n\
+                            - Special: has-assignee, no-assignee, has-label:bug, no-label\n\
+                            - Dates: Use relative dates like '1week', '3days', '2hours'\n\
+                            - Combine with AND: 'assignee:john AND priority:>2'\n\
+                            Examples:\n\
+                            - 'assignee:john@example.com AND state:started'\n\
+                            - 'priority:>2 AND created:>1week'\n\
+                            - 'title:~bug AND no-assignee'\n\
+                            - 'has-label:urgent AND updated:<2days'"
+                        )
+                )
+                .arg(
                     Arg::new("format")
                         .long("format")
-                        .short('f')
                         .value_name("FORMAT")
                         .help("Output format: simple, table, json")
                         .default_value("simple")
@@ -2516,6 +2907,71 @@ async fn main() {
                 )
         )
         .subcommand(
+            Command::new("search")
+                .about("Manage saved searches")
+                .subcommand_required(true)
+                .arg_required_else_help(true)
+                .subcommand(
+                    Command::new("save")
+                        .about("Save a search query")
+                        .arg(
+                            Arg::new("name")
+                                .value_name("NAME")
+                                .help("Name for the saved search")
+                                .required(true)
+                                .index(1)
+                        )
+                        .arg(
+                            Arg::new("query")
+                                .value_name("QUERY")
+                                .help("Search query to save")
+                                .required(true)
+                                .index(2)
+                        )
+                )
+                .subcommand(
+                    Command::new("list")
+                        .about("List all saved searches")
+                )
+                .subcommand(
+                    Command::new("delete")
+                        .about("Delete a saved search")
+                        .arg(
+                            Arg::new("name")
+                                .value_name("NAME")
+                                .help("Name of the saved search to delete")
+                                .required(true)
+                                .index(1)
+                        )
+                )
+                .subcommand(
+                    Command::new("run")
+                        .about("Run a saved search")
+                        .arg(
+                            Arg::new("name")
+                                .value_name("NAME")
+                                .help("Name of the saved search to run")
+                                .required(true)
+                                .index(1)
+                        )
+                        .arg(
+                            Arg::new("format")
+                                .long("format")
+                                .value_name("FORMAT")
+                                .help("Output format: simple, table, json")
+                                .default_value("simple")
+                        )
+                        .arg(
+                            Arg::new("limit")
+                                .long("limit")
+                                .short('l')
+                                .value_name("NUMBER")
+                                .help("Limit number of results")
+                                .default_value("50")
+                        )
+                )
+        )
+        .subcommand(
             Command::new("comment")
                 .about("Manage issue comments")
                 .subcommand_required(true)
@@ -2619,6 +3075,18 @@ async fn main() {
         Some(("projects", sub_matches)) => handle_projects(sub_matches).await,
         Some(("whoami", sub_matches)) => handle_whoami(sub_matches).await,
         Some(("issue", sub_matches)) => handle_issue(sub_matches).await,
+        Some(("search", sub_matches)) => {
+            match sub_matches.subcommand() {
+                Some(("save", search_matches)) => handle_save_search(search_matches).await,
+                Some(("list", _)) => handle_list_searches().await,
+                Some(("delete", search_matches)) => handle_delete_search(search_matches).await,
+                Some(("run", search_matches)) => handle_run_search(search_matches).await,
+                _ => {
+                    eprintln!("Unknown search subcommand. Use 'linear search --help' for available options.");
+                    process::exit(1);
+                }
+            }
+        }
         Some(("bulk", sub_matches)) => {
             match sub_matches.subcommand() {
                 Some(("update", bulk_matches)) => handle_bulk_update(bulk_matches).await,
