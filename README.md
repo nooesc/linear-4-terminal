@@ -30,6 +30,73 @@ A fast, powerful terminal client for Linear project management. Access Linear's 
 ✅ **Cross-platform**: Works on macOS, Linux, and Windows (WSL)  
 ✅ **Blazing Fast**: Built with Rust for instant response times  
 
+## Future Plans & Roadmap
+
+We're actively working on expanding the Linear CLI with powerful new features. Here's what's coming:
+
+### 🚧 Recently Completed (v2)
+- ✅ **Comments Management**: Full CRUD operations for issue comments
+- ✅ **Bulk Operations**: Batch update, move, and archive issues
+- ✅ **Advanced Search**: Query language with operators and saved searches
+
+### 📋 Planned Features (Priority Order)
+
+#### Medium Priority
+1. **Sprint/Cycle Management**
+   - Create and manage sprints/cycles
+   - Sprint planning and burndown charts
+   - Add/remove issues from sprints
+   - Sprint progress tracking
+
+2. **Issue Dependencies & Relationships**
+   - Link related issues, blockers, and dependencies
+   - Visualize dependency chains
+   - Block/unblock workflows
+
+3. **Git Integration**
+   - Create commits with issue references
+   - Link PRs to issues
+   - Update issue status from git hooks
+   - Branch naming conventions
+
+4. **Time Tracking & Estimates**
+   - Log time on issues
+   - Set and track estimates
+   - Time reports and summaries
+   - Velocity calculations
+
+5. **Advanced Reporting**
+   - Daily/weekly standup reports
+   - Team workload analysis
+   - Progress tracking dashboards
+   - Custom report generation
+
+#### Low Priority
+6. **Shell Completion**
+   - Bash, Zsh, Fish completions
+   - Context-aware suggestions
+   - Command aliases
+
+7. **Interactive Mode**
+   - Menu-driven interface
+   - Guided workflows
+   - Issue templates
+
+8. **Offline Mode**
+   - Queue changes when offline
+   - Automatic sync on reconnection
+   - Conflict resolution
+
+### 🎯 Long-term Vision
+
+- **Plugin System**: Extend functionality with custom plugins
+- **Webhook Integration**: React to Linear events
+- **AI Assistant**: Natural language commands
+- **Mobile Companion**: CLI commands from mobile
+- **Team Analytics**: Advanced metrics and insights
+
+Want to contribute? Check the features above and submit a PR!
+
 ## Installation
 
 ### macOS/Linux via Direct Download (Recommended)
@@ -513,74 +580,10 @@ This CLI covers the major Linear API operations:
 
 For debugging, you can inspect the API calls by modifying the code to add debug logging or use tools like `RUST_LOG=debug cargo run`.
 
-## Future Plans & Roadmap
-
-We're actively working on expanding the Linear CLI with powerful new features. Here's what's coming:
-
-### 🚧 In Development (v2)
-- ✅ **Comments Management**: Full CRUD operations for issue comments
-- ✅ **Bulk Operations**: Batch update, move, and archive issues
-- ✅ **Advanced Search**: Query language with operators and saved searches
-
-### 📋 Planned Features (Priority Order)
-
-#### Medium Priority
-1. **Sprint/Cycle Management**
-   - Create and manage sprints/cycles
-   - Sprint planning and burndown charts
-   - Add/remove issues from sprints
-   - Sprint progress tracking
-
-2. **Issue Dependencies & Relationships**
-   - Link related issues, blockers, and dependencies
-   - Visualize dependency chains
-   - Block/unblock workflows
-
-3. **Git Integration**
-   - Create commits with issue references
-   - Link PRs to issues
-   - Update issue status from git hooks
-   - Branch naming conventions
-
-4. **Time Tracking & Estimates**
-   - Log time on issues
-   - Set and track estimates
-   - Time reports and summaries
-   - Velocity calculations
-
-5. **Advanced Reporting**
-   - Daily/weekly standup reports
-   - Team workload analysis
-   - Progress tracking dashboards
-   - Custom report generation
-
-#### Low Priority
-6. **Shell Completion**
-   - Bash, Zsh, Fish completions
-   - Context-aware suggestions
-   - Command aliases
-
-7. **Interactive Mode**
-   - Menu-driven interface
-   - Guided workflows
-   - Issue templates
-
-8. **Offline Mode**
-   - Queue changes when offline
-   - Automatic sync on reconnection
-   - Conflict resolution
-
-### 🎯 Long-term Vision
-
-- **Plugin System**: Extend functionality with custom plugins
-- **Webhook Integration**: React to Linear events
-- **AI Assistant**: Natural language commands
-- **Mobile Companion**: CLI commands from mobile
-- **Team Analytics**: Advanced metrics and insights
 
 ## Contributing
 
-Contributions are welcome! Check our [roadmap](#future-plans--roadmap) above to see what we're working on.
+Contributions are welcome! Check our roadmap near the top of this README to see what we're working on.
 
 Ways to contribute:
 - Pick a feature from the roadmap
