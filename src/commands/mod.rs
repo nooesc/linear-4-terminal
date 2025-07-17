@@ -1,0 +1,23 @@
+pub mod auth;
+pub mod bulk;
+pub mod comments;
+pub mod create;
+pub mod delete;
+pub mod issues;
+pub mod projects;
+pub mod search;
+pub mod teams;
+pub mod update;
+pub mod whoami;
+
+pub use auth::handle_auth;
+pub use bulk::{handle_bulk_archive, handle_bulk_move, handle_bulk_update};
+pub use comments::{handle_add_comment, handle_delete_comment, handle_list_comments, handle_update_comment};
+pub use create::{handle_create_issue, handle_create_project};
+pub use delete::handle_delete;
+pub use issues::{handle_issue, handle_issues};
+pub use projects::handle_projects;
+pub use search::{handle_delete_search, handle_list_searches, handle_run_search, handle_save_search};
+pub use teams::handle_teams;
+pub use update::{handle_update_issue, handle_update_project};
+pub use whoami::handle_whoami;
