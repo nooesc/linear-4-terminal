@@ -8,6 +8,7 @@ mod constants;
 mod filtering;
 mod formatting;
 mod models;
+mod interactive;
 
 use commands::*;
 
@@ -16,8 +17,6 @@ async fn main() {
     let app = Command::new("linear")
         .about("Linear CLI - Interact with Linear's API from the command line")
         .version("1.0.0")
-        .subcommand_required(true)
-        .arg_required_else_help(true)
         .subcommand(
             Command::new("auth")
                 .about("Authenticate with Linear")
@@ -683,11 +682,17 @@ Date values support relative dates: 1hour, 2days, 1week, 1month"#)
                     Command::new("install-hook")
                         .about("Install the commit-msg git hook")
                 )
+        )
+        .subcommand(
+            Command::new("interactive")
+                .about("Enter interactive mode for managing Linear issues")
+                .visible_alias("i")
         );
 
     let matches = app.get_matches();
 
     let result = match matches.subcommand() {
+        None => interactive::handlers::run_interactive_mode().await,
         Some(("auth", sub_matches)) => handle_auth(sub_matches).await,
         Some(("issues", sub_matches)) => handle_issues(sub_matches).await,
         Some(("create", sub_matches)) => {
@@ -751,6 +756,7 @@ Date values support relative dates: 1hour, 2days, 1week, 1month"#)
                 _ => unreachable!("Subcommand required"),
             }
         }
+        Some(("interactive", _)) => interactive::handlers::run_interactive_mode().await,
         _ => unreachable!("Subcommand required"),
     };
 

@@ -29,6 +29,28 @@ A fast, powerful terminal client for Linear project management. Access Linear's 
 ✅ **Secure Authentication**: API key management with environment variables  
 ✅ **Cross-platform**: Works on macOS, Linux, and Windows (WSL)  
 ✅ **Blazing Fast**: Built with Rust for instant response times  
+✅ **Interactive Mode**: Real-time TUI for browsing and managing issues
+
+## Interactive Mode (NEW!)
+
+Launch an interactive terminal UI for browsing Linear issues:
+
+```bash
+linear interactive  # or just 'linear' without arguments
+```
+
+### Interactive Mode Features:
+- **Real-time Navigation**: Use arrow keys or j/k to browse issues
+- **Quick Search**: Press `/` to search issues by title or ID
+- **Group Toggle**: Press `g` to switch between status and project grouping
+- **Issue Details**: Press Enter to view full issue details
+- **Keyboard Shortcuts**: 
+  - `j/k` or ↓/↑ - Navigate up/down
+  - `Enter` - View issue details
+  - `/` - Search mode
+  - `g` - Toggle grouping (status/project)
+  - `r` - Refresh issues
+  - `q` - Quit
 
 ## Future Plans & Roadmap
 
@@ -39,6 +61,8 @@ We're actively working on expanding the Linear CLI with powerful new features. H
 - ✅ **Bulk Operations**: Batch update, move, and archive issues
 - ✅ **Advanced Search**: Query language with operators and saved searches
 - ✅ **Git Integration**: Create commits, branches, and PRs linked to Linear issues
+- ✅ **Interactive Mode**: Terminal UI with real-time navigation and search
+- ✅ **Project-based Grouping**: Group issues by project in addition to status
 
 ### 📋 Planned Features (Priority Order)
 
@@ -72,12 +96,7 @@ We're actively working on expanding the Linear CLI with powerful new features. H
    - Context-aware suggestions
    - Command aliases
 
-6. **Interactive Mode**
-   - Menu-driven interface
-   - Guided workflows
-   - Issue templates
-
-7. **Offline Mode**
+6. **Offline Mode**
    - Queue changes when offline
    - Automatic sync on reconnection
    - Conflict resolution
