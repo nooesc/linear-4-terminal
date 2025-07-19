@@ -105,7 +105,7 @@ pub async fn handle_run_search(matches: &ArgMatches) -> Result<(), Box<dyn std::
             if issues.is_empty() {
                 println!("No issues found matching your saved search.");
             } else {
-                print_issues(&issues, format);
+                print_issues(&issues, format, "status");
             }
         }
         Err(e) => {

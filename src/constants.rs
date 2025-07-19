@@ -33,6 +33,10 @@ pub const ISSUE_FIELDS: &str = r#"
             color
         }
     }
+    project {
+        id
+        name
+    }
 "#;
 
 pub const PROJECT_FIELDS: &str = r#"

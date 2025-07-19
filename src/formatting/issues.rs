@@ -24,7 +24,58 @@ pub fn get_state_icon(state_type: &str) -> &'static str {
     }
 }
 
-pub fn print_issues(issues: &[Issue], format: &str) {
+fn print_issue_line(issue: &Issue) {
+    let assignee = issue
+        .assignee
+        .as_ref()
+        .map(|a| extract_first_name(&a.name))
+        .unwrap_or("Unassigned");
+
+    // Format labels
+    let labels = if !issue.labels.nodes.is_empty() {
+        let label_str = issue.labels.nodes
+            .iter()
+            .map(|l| l.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(" [{}]", label_str.cyan())
+    } else {
+        String::new()
+    };
+
+    // Format description preview
+    let desc_preview = if let Some(desc) = &issue.description {
+        let cleaned = clean_description(desc);
+        if !cleaned.is_empty() {
+            format!("\n    {}", cleaned.dimmed())
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    println!(
+        "{} {} - {}{} ({}){}{}",
+        format_priority_indicator(issue.priority),
+        issue.identifier.blue(),
+        issue.title,
+        labels,
+        if assignee == "Unassigned" {
+            assignee.dimmed()
+        } else {
+            assignee.green()
+        },
+        desc_preview,
+        if issue.priority.unwrap_or(0) >= 3 {
+            format!(" {}", format_priority(issue.priority))
+        } else {
+            String::new()
+        }
+    );
+}
+
+pub fn print_issues(issues: &[Issue], format: &str, group_by: &str) {
     if issues.is_empty() {
         println!("{}", "No issues found.".dimmed());
         return;
@@ -72,109 +123,88 @@ pub fn print_issues(issues: &[Issue], format: &str) {
             println!("{}", "─".repeat(120).dimmed());
         }
         _ => {
-            // Group issues by state
+            // Group issues based on group_by parameter
             let mut grouped: std::collections::HashMap<String, Vec<&Issue>> = std::collections::HashMap::new();
             
-            for issue in issues {
-                grouped.entry(issue.state.name.clone()).or_default().push(issue);
-            }
-
-            // Define state order
-            let state_order = vec!["In Progress", "Todo", "Backlog", "Done", "Canceled"];
-            
-            // Print groups in order
-            for state_name in &state_order {
-                if let Some(group_issues) = grouped.get(*state_name) {
-                    // Print state header
-                    println!("\n{} {} ({})", 
-                        get_state_icon(&group_issues[0].state.state_type),
-                        state_name.bold(),
-                        group_issues.len()
-                    );
-                    println!("{}", "─".repeat(50).dimmed());
-
-                    // Print issues in this state
-                    for issue in group_issues {
-                        let assignee = issue
-                            .assignee
-                            .as_ref()
-                            .map(|a| extract_first_name(&a.name))
-                            .unwrap_or("Unassigned");
-
-                        // Format labels
-                        let labels = if !issue.labels.nodes.is_empty() {
-                            let label_str = issue.labels.nodes
-                                .iter()
-                                .map(|l| l.name.as_str())
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            format!(" [{}]", label_str.cyan())
-                        } else {
-                            String::new()
-                        };
-
-                        // Format description preview
-                        let desc_preview = if let Some(desc) = &issue.description {
-                            let cleaned = clean_description(desc);
-                            if !cleaned.is_empty() {
-                                format!("\n    {}", cleaned.dimmed())
-                            } else {
-                                String::new()
-                            }
-                        } else {
-                            String::new()
-                        };
-
-                        println!(
-                            "{} {} - {}{} ({}){}{}",
-                            format_priority_indicator(issue.priority),
-                            issue.identifier.blue(),
-                            issue.title,
-                            labels,
-                            if assignee == "Unassigned" {
-                                assignee.dimmed()
-                            } else {
-                                assignee.green()
-                            },
-                            desc_preview,
-                            if issue.priority.unwrap_or(0) >= 3 {
-                                format!(" {}", format_priority(issue.priority))
-                            } else {
-                                String::new()
-                            }
-                        );
+            match group_by {
+                "project" => {
+                    for issue in issues {
+                        let group_key = issue.project.as_ref()
+                            .map(|p| p.name.clone())
+                            .unwrap_or_else(|| "No Project".to_string());
+                        grouped.entry(group_key).or_default().push(issue);
+                    }
+                }
+                _ => { // default to "status"
+                    for issue in issues {
+                        grouped.entry(issue.state.name.clone()).or_default().push(issue);
                     }
                 }
             }
 
-            // Print any states not in our predefined order
-            for (state_name, group_issues) in &grouped {
-                if !state_order.contains(&state_name.as_str()) {
-                    println!("\n{} {} ({})", 
-                        get_state_icon(&group_issues[0].state.state_type),
-                        state_name.bold(),
-                        group_issues.len()
-                    );
-                    println!("{}", "─".repeat(50).dimmed());
-
-                    for issue in group_issues {
-                        let assignee = issue
-                            .assignee
-                            .as_ref()
-                            .map(|a| extract_first_name(&a.name))
-                            .unwrap_or("Unassigned");
-
-                        println!(
-                            "{} {} - {} ({})",
-                            format_priority_indicator(issue.priority),
-                            issue.identifier.blue(),
-                            issue.title,
-                            if assignee == "Unassigned" {
-                                assignee.dimmed()
-                            } else {
-                                assignee.green()
+            // Print groups based on grouping type
+            match group_by {
+                "project" => {
+                    // Sort project names alphabetically, with "No Project" last
+                    let mut project_names: Vec<String> = grouped.keys().cloned().collect();
+                    project_names.sort_by(|a, b| {
+                        if a == "No Project" { std::cmp::Ordering::Greater }
+                        else if b == "No Project" { std::cmp::Ordering::Less }
+                        else { a.cmp(b) }
+                    });
+                    
+                    for project_name in project_names {
+                        if let Some(group_issues) = grouped.get(&project_name) {
+                            // Print project header
+                            println!("\n📁 {} ({})", 
+                                project_name.bold().cyan(),
+                                group_issues.len()
+                            );
+                            println!("{}", "─".repeat(50).dimmed());
+                            
+                            // Print issues in this project
+                            for issue in group_issues {
+                                print_issue_line(issue);
                             }
-                        );
+                        }
+                    }
+                }
+                _ => { // status grouping
+                    // Define state order for status grouping
+                    let state_order = vec!["In Progress", "Todo", "Backlog", "Done", "Canceled"];
+                    
+                    // Print groups in order
+                    for state_name in &state_order {
+                        if let Some(group_issues) = grouped.get(*state_name) {
+                            // Print state header
+                            println!("\n{} {} ({})", 
+                                get_state_icon(&group_issues[0].state.state_type),
+                                state_name.bold(),
+                                group_issues.len()
+                            );
+                            println!("{}", "─".repeat(50).dimmed());
+
+                            // Print issues in this state
+                            for issue in group_issues {
+                                print_issue_line(issue);
+                            }
+                        }
+                    }
+
+                    // Print any states not in our predefined order
+                    for (state_name, group_issues) in &grouped {
+                        if !state_order.contains(&state_name.as_str()) {
+                            println!("\n{} {} ({})", 
+                                get_state_icon(&group_issues[0].state.state_type),
+                                state_name.bold(),
+                                group_issues.len()
+                            );
+                            println!("{}", "─".repeat(50).dimmed());
+
+                            for issue in group_issues {
+                                print_issue_line(issue);
+                            }
+                        }
                     }
                 }
             }

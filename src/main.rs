@@ -140,6 +140,14 @@ Date values support relative dates: 1hour, 2days, 1week, 1month"#)
                         .value_parser(["simple", "table", "json"])
                         .default_value("simple")
                 )
+                .arg(
+                    Arg::new("group-by")
+                        .long("group-by")
+                        .value_name("FIELD")
+                        .help("Group issues by: status (default), project")
+                        .value_parser(["status", "project"])
+                        .default_value("status")
+                )
         )
         .subcommand(
             Command::new("create")
@@ -667,7 +675,7 @@ Date values support relative dates: 1hour, 2days, 1week, 1month"#)
                                 .action(clap::ArgAction::SetTrue)
                         )
                 )
-                '''                .subcommand(
+                .subcommand(
                     Command::new("hook")
                         .about("Git hook integration (for commit-msg hook)")
                 )
@@ -675,7 +683,7 @@ Date values support relative dates: 1hour, 2days, 1week, 1month"#)
                     Command::new("install-hook")
                         .about("Install the commit-msg git hook")
                 )
-        );'';
+        );
 
     let matches = app.get_matches();
 

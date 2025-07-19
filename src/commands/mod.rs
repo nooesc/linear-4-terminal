@@ -16,7 +16,7 @@ pub use bulk::{handle_bulk_archive, handle_bulk_move, handle_bulk_update};
 pub use comments::{handle_add_comment, handle_delete_comment, handle_list_comments, handle_update_comment};
 pub use create::{handle_create_issue, handle_create_project};
 pub use delete::handle_delete;
-pub use git::{handle_git_branch, handle_git_commit, handle_git_hook, handle_git_pr};
+pub use git::{handle_git_branch, handle_git_commit, handle_git_hook, handle_git_pr, handle_install_hook};
 pub use issues::{handle_issue, handle_issues};
 pub use projects::handle_projects;
 pub use search::{handle_delete_search, handle_list_searches, handle_run_search, handle_save_search};

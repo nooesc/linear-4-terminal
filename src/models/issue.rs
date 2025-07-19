@@ -16,6 +16,7 @@ pub struct Issue {
     pub assignee: Option<super::User>,
     pub team: super::Team,
     pub labels: LabelConnection,
+    pub project: Option<Project>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -36,4 +37,10 @@ pub struct Label {
     pub id: String,
     pub name: String,
     pub color: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct Project {
+    pub id: String,
+    pub name: String,
 }

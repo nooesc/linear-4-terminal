@@ -10,6 +10,7 @@ pub async fn handle_issues(matches: &ArgMatches) -> Result<(), Box<dyn std::erro
     let client = LinearClient::new(api_key);
     
     let format = matches.get_one::<String>("format").map(|s| s.as_str()).unwrap_or("simple");
+    let group_by = matches.get_one::<String>("group-by").map(|s| s.as_str()).unwrap_or("status");
     let limit = matches.get_one::<String>("limit")
         .and_then(|s| s.parse::<i32>().ok())
         .unwrap_or(50);
@@ -73,7 +74,7 @@ pub async fn handle_issues(matches: &ArgMatches) -> Result<(), Box<dyn std::erro
         println!("No issues found matching your criteria.");
     } else {
         println!("Found {} issues:", issues.len());
-        print_issues(&issues, format);
+        print_issues(&issues, format, group_by);
     }
 
     Ok(())
