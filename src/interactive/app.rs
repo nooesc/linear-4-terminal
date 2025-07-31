@@ -1,4 +1,4 @@
-use crate::models::Issue;
+use crate::models::{Issue, WorkflowState};
 use crate::client::LinearClient;
 use crate::config::get_api_key;
 use crossterm::event::KeyCode;
@@ -13,6 +13,7 @@ pub enum AppMode {
     Comment,
     Edit,
     EditField,
+    SelectOption,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -44,10 +45,15 @@ pub struct InteractiveApp {
     pub loading: bool,
     pub error_message: Option<String>,
     pub comment_input: String,
+    pub comment_cursor_position: usize,
     pub selected_issue_id: Option<String>,
     pub edit_field: EditField,
     pub edit_input: String,
     pub edit_field_index: usize,
+    pub workflow_states: Vec<WorkflowState>,
+    pub option_index: usize,
+    pub selected_option: Option<String>,
+    pub cursor_position: usize,
 }
 
 impl InteractiveApp {
@@ -68,13 +74,27 @@ impl InteractiveApp {
             loading: false,
             error_message: None,
             comment_input: String::new(),
+            comment_cursor_position: 0,
             selected_issue_id: None,
             edit_field: EditField::Title,
             edit_input: String::new(),
             edit_field_index: 0,
+            workflow_states: Vec::new(),
+            option_index: 0,
+            selected_option: None,
+            cursor_position: 0,
         };
         
         app.refresh_issues().await?;
+        match app.client.get_workflow_states().await {
+            Ok(states) => {
+                app.workflow_states = states;
+            }
+            Err(e) => {
+                eprintln!("Failed to fetch workflow states: {}", e);
+                app.workflow_states = Vec::new();
+            }
+        }
         Ok(app)
     }
 
@@ -124,6 +144,7 @@ impl InteractiveApp {
             AppMode::Comment => self.handle_comment_mode_key(key),
             AppMode::Edit => self.handle_edit_mode_key(key),
             AppMode::EditField => self.handle_edit_field_mode_key(key),
+            AppMode::SelectOption => self.handle_select_option_mode_key(key),
         }
     }
 
@@ -188,6 +209,7 @@ impl InteractiveApp {
                 if let Some(issue) = self.get_selected_issue() {
                     self.selected_issue_id = Some(issue.id.clone());
                     self.comment_input.clear();
+                    self.comment_cursor_position = 0;
                     self.mode = AppMode::Comment;
                 }
             }
@@ -207,16 +229,42 @@ impl InteractiveApp {
             KeyCode::Esc => {
                 self.mode = AppMode::Detail;
                 self.comment_input.clear();
+                self.comment_cursor_position = 0;
             }
             KeyCode::Enter => {
                 // Comment submission will be handled in the main loop
                 // because it's async
             }
             KeyCode::Char(c) => {
-                self.comment_input.push(c);
+                self.comment_input.insert(self.comment_cursor_position, c);
+                self.comment_cursor_position += 1;
             }
             KeyCode::Backspace => {
-                self.comment_input.pop();
+                if self.comment_cursor_position > 0 {
+                    self.comment_input.remove(self.comment_cursor_position - 1);
+                    self.comment_cursor_position -= 1;
+                }
+            }
+            KeyCode::Delete => {
+                if self.comment_cursor_position < self.comment_input.len() {
+                    self.comment_input.remove(self.comment_cursor_position);
+                }
+            }
+            KeyCode::Left => {
+                if self.comment_cursor_position > 0 {
+                    self.comment_cursor_position -= 1;
+                }
+            }
+            KeyCode::Right => {
+                if self.comment_cursor_position < self.comment_input.len() {
+                    self.comment_cursor_position += 1;
+                }
+            }
+            KeyCode::Home => {
+                self.comment_cursor_position = 0;
+            }
+            KeyCode::End => {
+                self.comment_cursor_position = self.comment_input.len();
             }
             _ => {}
         }
@@ -300,24 +348,28 @@ impl InteractiveApp {
                     _ => EditField::Title,
                 };
                 self.edit_input.clear();
-                // Pre-fill with current value
-                if let Some(issue) = self.get_selected_issue() {
-                    self.edit_input = match self.edit_field {
-                        EditField::Title => issue.title.clone(),
-                        EditField::Description => issue.description.clone().unwrap_or_default(),
-                        EditField::Status => issue.state.name.clone(),
-                        EditField::Assignee => issue.assignee.as_ref().map(|a| a.name.clone()).unwrap_or_default(),
-                        EditField::Priority => match issue.priority {
-                            Some(0) => "None".to_string(),
-                            Some(1) => "Low".to_string(),
-                            Some(2) => "Medium".to_string(),
-                            Some(3) => "High".to_string(),
-                            Some(4) => "Urgent".to_string(),
-                            _ => "None".to_string(),
-                        },
-                    };
+                
+                // For status and priority, show selection mode
+                match self.edit_field {
+                    EditField::Status | EditField::Priority => {
+                        self.option_index = 0;
+                        self.selected_option = None;
+                        self.mode = AppMode::SelectOption;
+                    }
+                    _ => {
+                        // Pre-fill with current value for text fields
+                        if let Some(issue) = self.get_selected_issue() {
+                            self.edit_input = match self.edit_field {
+                                EditField::Title => issue.title.clone(),
+                                EditField::Description => issue.description.clone().unwrap_or_default(),
+                                EditField::Assignee => issue.assignee.as_ref().map(|a| a.name.clone()).unwrap_or_default(),
+                                _ => String::new(),
+                            };
+                        }
+                        self.cursor_position = self.edit_input.len();
+                        self.mode = AppMode::EditField;
+                    }
                 }
-                self.mode = AppMode::EditField;
             }
             _ => {}
         }
@@ -328,15 +380,81 @@ impl InteractiveApp {
             KeyCode::Esc => {
                 self.mode = AppMode::Edit;
                 self.edit_input.clear();
+                self.cursor_position = 0;
             }
             KeyCode::Enter => {
                 // Submit edit - will be handled in main loop
             }
             KeyCode::Char(c) => {
-                self.edit_input.push(c);
+                self.edit_input.insert(self.cursor_position, c);
+                self.cursor_position += 1;
             }
             KeyCode::Backspace => {
-                self.edit_input.pop();
+                if self.cursor_position > 0 {
+                    self.edit_input.remove(self.cursor_position - 1);
+                    self.cursor_position -= 1;
+                }
+            }
+            KeyCode::Delete => {
+                if self.cursor_position < self.edit_input.len() {
+                    self.edit_input.remove(self.cursor_position);
+                }
+            }
+            KeyCode::Left => {
+                if self.cursor_position > 0 {
+                    self.cursor_position -= 1;
+                }
+            }
+            KeyCode::Right => {
+                if self.cursor_position < self.edit_input.len() {
+                    self.cursor_position += 1;
+                }
+            }
+            KeyCode::Home => {
+                self.cursor_position = 0;
+            }
+            KeyCode::End => {
+                self.cursor_position = self.edit_input.len();
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_select_option_mode_key(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.mode = AppMode::Edit;
+                self.option_index = 0;
+                self.selected_option = None;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.option_index > 0 {
+                    self.option_index -= 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let max_index = match self.edit_field {
+                    EditField::Status => self.workflow_states.len().saturating_sub(1),
+                    EditField::Priority => 4, // 0-4 for None, Low, Medium, High, Urgent
+                    _ => 0,
+                };
+                if self.option_index < max_index {
+                    self.option_index += 1;
+                }
+            }
+            KeyCode::Enter => {
+                match self.edit_field {
+                    EditField::Status => {
+                        if let Some(state) = self.workflow_states.get(self.option_index) {
+                            self.selected_option = Some(state.id.clone());
+                        }
+                    }
+                    EditField::Priority => {
+                        self.selected_option = Some(self.option_index.to_string());
+                    }
+                    _ => {}
+                }
+                // Submit will be handled in main loop
             }
             _ => {}
         }
@@ -344,36 +462,61 @@ impl InteractiveApp {
 
     pub async fn submit_edit(&mut self) -> Result<(), Box<dyn Error>> {
         if let Some(issue_id) = &self.selected_issue_id {
-            if !self.edit_input.trim().is_empty() {
-                self.loading = true;
-                
-                let result = match self.edit_field {
-                    EditField::Title => {
+            self.loading = true;
+            
+            let result = match self.edit_field {
+                EditField::Title => {
+                    if !self.edit_input.trim().is_empty() {
                         self.client.update_issue(issue_id, Some(&self.edit_input), None, None, None, None, None).await
-                    }
-                    EditField::Description => {
-                        self.client.update_issue(issue_id, None, Some(&self.edit_input), None, None, None, None).await
-                    }
-                    _ => {
-                        // For now, only support title and description
+                    } else {
                         self.loading = false;
-                        self.error_message = Some("This field is not yet editable".to_string());
                         return Ok(());
                     }
-                };
-                
-                match result {
-                    Ok(_) => {
+                }
+                EditField::Description => {
+                    self.client.update_issue(issue_id, None, Some(&self.edit_input), None, None, None, None).await
+                }
+                EditField::Status => {
+                    if let Some(state_id) = &self.selected_option {
+                        self.client.update_issue(issue_id, None, None, Some(state_id), None, None, None).await
+                    } else {
                         self.loading = false;
-                        self.edit_input.clear();
-                        self.mode = AppMode::Detail;
-                        // Refresh issues to show the update
-                        let _ = self.refresh_issues().await;
+                        return Ok(());
                     }
-                    Err(e) => {
+                }
+                EditField::Priority => {
+                    if let Some(priority_str) = &self.selected_option {
+                        if let Ok(priority) = priority_str.parse::<u8>() {
+                            self.client.update_issue(issue_id, None, None, None, Some(priority), None, None).await
+                        } else {
+                            self.loading = false;
+                            return Ok(());
+                        }
+                    } else {
                         self.loading = false;
-                        self.error_message = Some(format!("Failed to update: {}", e));
+                        return Ok(());
                     }
+                }
+                EditField::Assignee => {
+                    // For now, assignee still uses text input
+                    self.loading = false;
+                    self.error_message = Some("Assignee field is not yet editable".to_string());
+                    return Ok(());
+                }
+            };
+            
+            match result {
+                Ok(_) => {
+                    self.loading = false;
+                    self.edit_input.clear();
+                    self.selected_option = None;
+                    self.mode = AppMode::Detail;
+                    // Refresh issues to show the update
+                    let _ = self.refresh_issues().await;
+                }
+                Err(e) => {
+                    self.loading = false;
+                    self.error_message = Some(format!("Failed to update: {}", e));
                 }
             }
         }

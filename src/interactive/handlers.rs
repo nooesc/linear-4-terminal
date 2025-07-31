@@ -45,6 +45,10 @@ pub async fn run_interactive_mode() -> Result<(), Box<dyn std::error::Error>> {
                         // Submit edit
                         let _ = app.submit_edit().await;
                     }
+                    KeyCode::Enter if app.mode == super::app::AppMode::SelectOption => {
+                        // Submit selection
+                        let _ = app.submit_edit().await;
+                    }
                     _ => app.handle_key(key_event.code),
                 }
             }

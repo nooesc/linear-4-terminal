@@ -485,6 +485,31 @@ impl LinearClient {
         Self::check_success(data.issue_update.success, data.issue_update.issue, "Failed to update issue")
     }
 
+    pub async fn get_workflow_states(&self) -> Result<Vec<WorkflowState>, Box<dyn std::error::Error>> {
+        let query = r#"
+            query {
+                workflowStates(first: 50) {
+                    nodes {
+                        id
+                        name
+                        type
+                        color
+                        position
+                    }
+                }
+            }
+        "#;
+        
+        #[derive(Debug, Deserialize)]
+        struct WorkflowStatesData {
+            #[serde(rename = "workflowStates")]
+            workflow_states: Connection<WorkflowState>,
+        }
+        
+        let data: WorkflowStatesData = self.execute_query(query, None).await?;
+        Ok(data.workflow_states.nodes)
+    }
+
     pub async fn move_issue(
         &self,
         issue_id: &str,

@@ -20,7 +20,7 @@ pub fn draw(frame: &mut Frame, app: &InteractiveApp) {
     draw_header(frame, chunks[0], app);
     
     match app.mode {
-        AppMode::Detail | AppMode::Comment | AppMode::Edit | AppMode::EditField => {
+        AppMode::Detail | AppMode::Comment | AppMode::Edit | AppMode::EditField | AppMode::SelectOption => {
             if let Some(issue) = app.get_selected_issue() {
                 draw_issue_detail(frame, chunks[1], issue);
             }
@@ -32,9 +32,10 @@ pub fn draw(frame: &mut Frame, app: &InteractiveApp) {
     
     // Draw overlays on top of everything
     match app.mode {
-        AppMode::Comment => draw_comment_overlay(frame, frame.size(), &app.comment_input),
+        AppMode::Comment => draw_comment_overlay(frame, frame.size(), &app.comment_input, app.comment_cursor_position),
         AppMode::Edit => draw_edit_menu_overlay(frame, frame.size(), app),
         AppMode::EditField => draw_edit_field_overlay(frame, frame.size(), app),
+        AppMode::SelectOption => draw_select_option_overlay(frame, frame.size(), app),
         _ => {}
     }
 }
@@ -53,11 +54,12 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
         AppMode::Comment => " Add Comment ",
         AppMode::Edit => " Edit Issue ",
         AppMode::EditField => " Edit Field ",
+        AppMode::SelectOption => " Select Option ",
     };
 
     let header = Paragraph::new(title)
-        .style(Style::default().bg(Color::Blue).fg(Color::White))
-        .block(Block::default().borders(Borders::ALL));
+        .style(Style::default().bg(Color::Black).fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)));
     frame.render_widget(header, header_chunks[0]);
 
     let info = format!(" Issues: {} | Group by: {} ", 
@@ -68,8 +70,8 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
         }
     );
     let info_widget = Paragraph::new(info)
-        .style(Style::default().bg(Color::DarkGray).fg(Color::White))
-        .block(Block::default().borders(Borders::ALL));
+        .style(Style::default().bg(Color::Black).fg(Color::Yellow))
+        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)));
     frame.render_widget(info_widget, header_chunks[1]);
 }
 
@@ -143,7 +145,7 @@ fn draw_issues_list(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
     
     // Draw comment overlay if in comment mode
     if app.mode == AppMode::Comment {
-        draw_comment_overlay(frame, area, &app.comment_input);
+        draw_comment_overlay(frame, area, &app.comment_input, app.comment_cursor_position);
     }
 }
 
@@ -223,13 +225,16 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
             "[↑/↓] Select Field  [Enter] Edit  [Esc] Cancel"
         }
         AppMode::EditField => {
-            "[Enter] Save  [Esc] Cancel  Type to edit..."
+            "[Enter] Save  [Esc] Cancel  [←/→] Move cursor  Type to edit..."
+        }
+        AppMode::SelectOption => {
+            "[↑/↓] Select  [Enter] Confirm  [Esc/q] Cancel"
         }
     };
 
     let footer = Paragraph::new(help_text)
-        .style(Style::default().bg(Color::DarkGray).fg(Color::White))
-        .block(Block::default().borders(Borders::ALL))
+        .style(Style::default().bg(Color::Black).fg(Color::Green))
+        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)))
         .alignment(Alignment::Center);
     frame.render_widget(footer, area);
 }
@@ -269,7 +274,7 @@ fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
-fn draw_comment_overlay(frame: &mut Frame, area: Rect, comment_input: &str) {
+fn draw_comment_overlay(frame: &mut Frame, area: Rect, comment_input: &str, cursor_position: usize) {
     let popup_area = centered_rect(70, 10, area);
     
     // First, clear the area completely
@@ -316,16 +321,25 @@ fn draw_comment_overlay(frame: &mut Frame, area: Rect, comment_input: &str) {
             ratatui::text::Line::from("_").style(Style::default().fg(Color::Yellow).add_modifier(Modifier::SLOW_BLINK)),
             ratatui::text::Line::from(""),
             ratatui::text::Line::from(""),
-            ratatui::text::Line::from("[Enter] Submit • [Esc] Cancel").style(Style::default().fg(Color::DarkGray)),
+            ratatui::text::Line::from("[Enter] Submit • [Esc] Cancel • [←/→] Move cursor").style(Style::default().fg(Color::DarkGray)),
         ];
         let help_paragraph = Paragraph::new(help_text)
             .alignment(Alignment::Center);
         frame.render_widget(help_paragraph, text_area);
     } else {
+        // Create the text with cursor
+        let (before_cursor, after_cursor) = comment_input.split_at(cursor_position);
+        let mut spans = vec![
+            ratatui::text::Span::raw(before_cursor),
+            ratatui::text::Span::styled("_", Style::default().fg(Color::Yellow).add_modifier(Modifier::SLOW_BLINK)),
+        ];
+        if !after_cursor.is_empty() {
+            spans.push(ratatui::text::Span::raw(after_cursor));
+        }
+        
         let input_text = vec![
             ratatui::text::Line::from(""),
-            ratatui::text::Line::from(format!("{}_", comment_input))
-                .style(Style::default().fg(Color::White)),
+            ratatui::text::Line::from(spans),
         ];
         let input_paragraph = Paragraph::new(input_text)
             .wrap(Wrap { trim: true });
@@ -338,7 +352,7 @@ fn draw_comment_overlay(frame: &mut Frame, area: Rect, comment_input: &str) {
             width: text_area.width,
             height: 1,
         };
-        let help = Paragraph::new("[Enter] Submit • [Esc] Cancel")
+        let help = Paragraph::new("[Enter] Submit • [Esc] Cancel • [←/→] Move cursor")
             .style(Style::default().fg(Color::DarkGray))
             .alignment(Alignment::Center);
         frame.render_widget(help, help_area);
@@ -390,14 +404,16 @@ fn draw_edit_menu_overlay(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
     for (name, index) in fields {
         let style = if index == app.edit_field_index {
             Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)
-        } else if index <= 1 {
-            Style::default().fg(Color::White)
         } else {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(Color::White)
         };
         
         let prefix = if index == app.edit_field_index { " › " } else { "   " };
-        let suffix = if index > 1 { " (not yet available)" } else { "" };
+        let suffix = match (name, index) {
+            ("Status", _) | ("Priority", _) => " [select]",
+            ("Assignee", _) => " [coming soon]",
+            _ => "",
+        };
         
         lines.push(ratatui::text::Line::from(format!("{}{}{}", prefix, name, suffix)).style(style));
     }
@@ -462,10 +478,19 @@ fn draw_edit_field_overlay(frame: &mut Frame, area: Rect, app: &InteractiveApp) 
             ratatui::text::Line::from("_").style(Style::default().fg(Color::Yellow).add_modifier(Modifier::SLOW_BLINK)),
         ]
     } else {
+        // Create the text with cursor
+        let (before_cursor, after_cursor) = app.edit_input.split_at(app.cursor_position);
+        let mut spans = vec![
+            ratatui::text::Span::raw(before_cursor),
+            ratatui::text::Span::styled("_", Style::default().fg(Color::Yellow).add_modifier(Modifier::SLOW_BLINK)),
+        ];
+        if !after_cursor.is_empty() {
+            spans.push(ratatui::text::Span::raw(after_cursor));
+        }
+        
         vec![
             ratatui::text::Line::from(""),
-            ratatui::text::Line::from(format!("{}_", app.edit_input))
-                .style(Style::default().fg(Color::White)),
+            ratatui::text::Line::from(spans),
         ]
     };
     
@@ -480,10 +505,111 @@ fn draw_edit_field_overlay(frame: &mut Frame, area: Rect, app: &InteractiveApp) 
         width: text_area.width,
         height: 1,
     };
-    let help = Paragraph::new("[Enter] Save • [Esc] Cancel")
+    let help = Paragraph::new("[Enter] Save • [Esc] Cancel • [←/→] Move cursor")
         .style(Style::default().fg(Color::DarkGray))
         .alignment(Alignment::Center);
     frame.render_widget(help, help_area);
+}
+
+fn draw_select_option_overlay(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
+    let height = match app.edit_field {
+        EditField::Status => (app.workflow_states.len() + 4).min(20) as u16,
+        EditField::Priority => 9,
+        _ => 10,
+    };
+    
+    let popup_area = centered_rect(60, height, area);
+    
+    // Clear the area
+    frame.render_widget(Clear, popup_area);
+    
+    // Draw shadow
+    let shadow_area = Rect {
+        x: popup_area.x.saturating_sub(1),
+        y: popup_area.y.saturating_sub(1),
+        width: popup_area.width + 2,
+        height: popup_area.height + 2,
+    };
+    let shadow = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .style(Style::default().bg(Color::Black));
+    frame.render_widget(shadow, shadow_area);
+    
+    // Draw main box
+    let title = match app.edit_field {
+        EditField::Status => "Select Status",
+        EditField::Priority => "Select Priority",
+        _ => "Select Option",
+    };
+    
+    let select_block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!("╭─ {} ─╮", title))
+        .title_alignment(Alignment::Center)
+        .border_style(Style::default().fg(Color::Magenta).bg(Color::Black).add_modifier(Modifier::BOLD))
+        .style(Style::default().bg(Color::Black));
+    
+    frame.render_widget(select_block.clone(), popup_area);
+    
+    let inner_area = select_block.inner(popup_area);
+    
+    // Create list items based on field type
+    let items: Vec<ListItem> = match app.edit_field {
+        EditField::Status => {
+            if app.workflow_states.is_empty() {
+                vec![ListItem::new(" No workflow states available ").style(Style::default().fg(Color::Red))]
+            } else {
+                app.workflow_states
+                    .iter()
+                    .enumerate()
+                    .map(|(i, state)| {
+                        let current_marker = if let Some(issue) = app.get_selected_issue() {
+                            if issue.state.name == state.name { " (current)" } else { "" }
+                        } else {
+                            ""
+                        };
+                        let content = format!(" {}{} ", state.name, current_marker);
+                        let style = if i == app.option_index {
+                            Style::default().fg(Color::Black).bg(Color::Magenta)
+                        } else if !current_marker.is_empty() {
+                            Style::default().fg(Color::Cyan)
+                        } else {
+                            Style::default().fg(Color::White)
+                        };
+                        ListItem::new(content).style(style)
+                    })
+                    .collect()
+            }
+        }
+        EditField::Priority => {
+            let priorities = vec![
+                ("None", 0),
+                ("Low", 1),
+                ("Medium", 2),
+                ("High", 3),
+                ("Urgent", 4),
+            ];
+            
+            priorities
+                .iter()
+                .enumerate()
+                .map(|(i, (name, _))| {
+                    let content = format!(" {} ", name);
+                    let style = if i == app.option_index {
+                        Style::default().fg(Color::Black).bg(Color::Magenta)
+                    } else {
+                        Style::default().fg(Color::White)
+                    };
+                    ListItem::new(content).style(style)
+                })
+                .collect()
+        }
+        _ => vec![],
+    };
+    
+    let list = List::new(items);
+    frame.render_widget(list, inner_area);
 }
 
 fn truncate(s: &str, max_width: usize) -> String {
