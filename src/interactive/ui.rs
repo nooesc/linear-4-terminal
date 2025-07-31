@@ -1,11 +1,11 @@
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
     Frame,
 };
 use crate::models::Issue;
-use super::app::{AppMode, GroupBy, InteractiveApp};
+use super::app::{AppMode, EditField, GroupBy, InteractiveApp};
 
 pub fn draw(frame: &mut Frame, app: &InteractiveApp) {
     let chunks = Layout::default()
@@ -20,7 +20,7 @@ pub fn draw(frame: &mut Frame, app: &InteractiveApp) {
     draw_header(frame, chunks[0], app);
     
     match app.mode {
-        AppMode::Detail => {
+        AppMode::Detail | AppMode::Comment | AppMode::Edit | AppMode::EditField => {
             if let Some(issue) = app.get_selected_issue() {
                 draw_issue_detail(frame, chunks[1], issue);
             }
@@ -29,6 +29,14 @@ pub fn draw(frame: &mut Frame, app: &InteractiveApp) {
     }
     
     draw_footer(frame, chunks[2], app);
+    
+    // Draw overlays on top of everything
+    match app.mode {
+        AppMode::Comment => draw_comment_overlay(frame, frame.size(), &app.comment_input),
+        AppMode::Edit => draw_edit_menu_overlay(frame, frame.size(), app),
+        AppMode::EditField => draw_edit_field_overlay(frame, frame.size(), app),
+        _ => {}
+    }
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
@@ -42,6 +50,9 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
         AppMode::Search => " Search Mode ",
         AppMode::Filter => " Filter Mode ",
         AppMode::Detail => " Issue Detail ",
+        AppMode::Comment => " Add Comment ",
+        AppMode::Edit => " Edit Issue ",
+        AppMode::EditField => " Edit Field ",
     };
 
     let header = Paragraph::new(title)
@@ -129,6 +140,11 @@ fn draw_issues_list(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
     if app.mode == AppMode::Search {
         draw_search_overlay(frame, area, &app.search_query);
     }
+    
+    // Draw comment overlay if in comment mode
+    if app.mode == AppMode::Comment {
+        draw_comment_overlay(frame, area, &app.comment_input);
+    }
 }
 
 fn draw_issue_detail(frame: &mut Frame, area: Rect, issue: &Issue) {
@@ -200,6 +216,15 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
         AppMode::Detail => {
             "[Esc/q] Back  [e] Edit  [c] Comment"
         }
+        AppMode::Comment => {
+            "[Esc] Cancel  [Enter] Submit  Type your comment..."
+        }
+        AppMode::Edit => {
+            "[↑/↓] Select Field  [Enter] Edit  [Esc] Cancel"
+        }
+        AppMode::EditField => {
+            "[Enter] Save  [Esc] Cancel  Type to edit..."
+        }
     };
 
     let footer = Paragraph::new(help_text)
@@ -242,6 +267,223 @@ fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+fn draw_comment_overlay(frame: &mut Frame, area: Rect, comment_input: &str) {
+    let popup_area = centered_rect(70, 10, area);
+    
+    // First, clear the area completely
+    frame.render_widget(Clear, popup_area);
+    
+    // Draw a shadow/border effect around the popup
+    let shadow_area = Rect {
+        x: popup_area.x.saturating_sub(1),
+        y: popup_area.y.saturating_sub(1),
+        width: popup_area.width + 2,
+        height: popup_area.height + 2,
+    };
+    let shadow = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .style(Style::default().bg(Color::Black));
+    frame.render_widget(shadow, shadow_area);
+    
+    // Now draw the main comment box
+    let comment_block = Block::default()
+        .borders(Borders::ALL)
+        .title("╭─ Add Comment ─╮")
+        .title_alignment(Alignment::Center)
+        .border_style(Style::default().fg(Color::Yellow).bg(Color::Black).add_modifier(Modifier::BOLD))
+        .style(Style::default().bg(Color::Black));
+    
+    frame.render_widget(comment_block.clone(), popup_area);
+    
+    let inner_area = comment_block.inner(popup_area);
+    
+    // Add some padding
+    let text_area = Rect {
+        x: inner_area.x + 1,
+        y: inner_area.y + 1,
+        width: inner_area.width.saturating_sub(2),
+        height: inner_area.height.saturating_sub(2),
+    };
+    
+    if comment_input.is_empty() {
+        let help_text = vec![
+            ratatui::text::Line::from(""),
+            ratatui::text::Line::from("Type your comment below:").style(Style::default().fg(Color::Gray)),
+            ratatui::text::Line::from(""),
+            ratatui::text::Line::from("_").style(Style::default().fg(Color::Yellow).add_modifier(Modifier::SLOW_BLINK)),
+            ratatui::text::Line::from(""),
+            ratatui::text::Line::from(""),
+            ratatui::text::Line::from("[Enter] Submit • [Esc] Cancel").style(Style::default().fg(Color::DarkGray)),
+        ];
+        let help_paragraph = Paragraph::new(help_text)
+            .alignment(Alignment::Center);
+        frame.render_widget(help_paragraph, text_area);
+    } else {
+        let input_text = vec![
+            ratatui::text::Line::from(""),
+            ratatui::text::Line::from(format!("{}_", comment_input))
+                .style(Style::default().fg(Color::White)),
+        ];
+        let input_paragraph = Paragraph::new(input_text)
+            .wrap(Wrap { trim: true });
+        frame.render_widget(input_paragraph, text_area);
+        
+        // Show help at bottom
+        let help_area = Rect {
+            x: text_area.x,
+            y: text_area.y + text_area.height.saturating_sub(1),
+            width: text_area.width,
+            height: 1,
+        };
+        let help = Paragraph::new("[Enter] Submit • [Esc] Cancel")
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(Alignment::Center);
+        frame.render_widget(help, help_area);
+    }
+}
+
+fn draw_edit_menu_overlay(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
+    let popup_area = centered_rect(60, 12, area);
+    
+    // Clear the area
+    frame.render_widget(Clear, popup_area);
+    
+    // Draw shadow
+    let shadow_area = Rect {
+        x: popup_area.x.saturating_sub(1),
+        y: popup_area.y.saturating_sub(1),
+        width: popup_area.width + 2,
+        height: popup_area.height + 2,
+    };
+    let shadow = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .style(Style::default().bg(Color::Black));
+    frame.render_widget(shadow, shadow_area);
+    
+    // Draw main box
+    let edit_block = Block::default()
+        .borders(Borders::ALL)
+        .title("╭─ Edit Issue ─╮")
+        .title_alignment(Alignment::Center)
+        .border_style(Style::default().fg(Color::Cyan).bg(Color::Black).add_modifier(Modifier::BOLD))
+        .style(Style::default().bg(Color::Black));
+    
+    frame.render_widget(edit_block.clone(), popup_area);
+    
+    let inner_area = edit_block.inner(popup_area);
+    
+    // Create menu items
+    let fields = vec![
+        ("Title", 0),
+        ("Description", 1),
+        ("Status", 2),
+        ("Assignee", 3),
+        ("Priority", 4),
+    ];
+    
+    let mut lines = vec![ratatui::text::Line::from("")];
+    
+    for (name, index) in fields {
+        let style = if index == app.edit_field_index {
+            Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)
+        } else if index <= 1 {
+            Style::default().fg(Color::White)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        
+        let prefix = if index == app.edit_field_index { " › " } else { "   " };
+        let suffix = if index > 1 { " (not yet available)" } else { "" };
+        
+        lines.push(ratatui::text::Line::from(format!("{}{}{}", prefix, name, suffix)).style(style));
+    }
+    
+    lines.push(ratatui::text::Line::from(""));
+    lines.push(ratatui::text::Line::from("Use ↑/↓ to select, Enter to edit").style(Style::default().fg(Color::DarkGray)));
+    
+    let menu = Paragraph::new(lines);
+    frame.render_widget(menu, inner_area);
+}
+
+fn draw_edit_field_overlay(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
+    let popup_area = centered_rect(70, 10, area);
+    
+    // Clear the area
+    frame.render_widget(Clear, popup_area);
+    
+    // Draw shadow
+    let shadow_area = Rect {
+        x: popup_area.x.saturating_sub(1),
+        y: popup_area.y.saturating_sub(1),
+        width: popup_area.width + 2,
+        height: popup_area.height + 2,
+    };
+    let shadow = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .style(Style::default().bg(Color::Black));
+    frame.render_widget(shadow, shadow_area);
+    
+    // Draw main box
+    let field_name = match app.edit_field {
+        EditField::Title => "Title",
+        EditField::Description => "Description",
+        EditField::Status => "Status",
+        EditField::Assignee => "Assignee",
+        EditField::Priority => "Priority",
+    };
+    
+    let edit_block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!("╭─ Edit {} ─╮", field_name))
+        .title_alignment(Alignment::Center)
+        .border_style(Style::default().fg(Color::Green).bg(Color::Black).add_modifier(Modifier::BOLD))
+        .style(Style::default().bg(Color::Black));
+    
+    frame.render_widget(edit_block.clone(), popup_area);
+    
+    let inner_area = edit_block.inner(popup_area);
+    let text_area = Rect {
+        x: inner_area.x + 1,
+        y: inner_area.y + 1,
+        width: inner_area.width.saturating_sub(2),
+        height: inner_area.height.saturating_sub(2),
+    };
+    
+    let input_text = if app.edit_input.is_empty() {
+        vec![
+            ratatui::text::Line::from(""),
+            ratatui::text::Line::from(format!("Current value: (empty)")).style(Style::default().fg(Color::DarkGray)),
+            ratatui::text::Line::from(""),
+            ratatui::text::Line::from("_").style(Style::default().fg(Color::Yellow).add_modifier(Modifier::SLOW_BLINK)),
+        ]
+    } else {
+        vec![
+            ratatui::text::Line::from(""),
+            ratatui::text::Line::from(format!("{}_", app.edit_input))
+                .style(Style::default().fg(Color::White)),
+        ]
+    };
+    
+    let input_paragraph = Paragraph::new(input_text)
+        .wrap(Wrap { trim: true });
+    frame.render_widget(input_paragraph, text_area);
+    
+    // Show help at bottom
+    let help_area = Rect {
+        x: text_area.x,
+        y: text_area.y + text_area.height.saturating_sub(1),
+        width: text_area.width,
+        height: 1,
+    };
+    let help = Paragraph::new("[Enter] Save • [Esc] Cancel")
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
+    frame.render_widget(help, help_area);
 }
 
 fn truncate(s: &str, max_width: usize) -> String {

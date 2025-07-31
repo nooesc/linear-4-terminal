@@ -37,6 +37,14 @@ pub async fn run_interactive_mode() -> Result<(), Box<dyn std::error::Error>> {
                         // Refresh issues
                         let _ = app.refresh_issues().await;
                     }
+                    KeyCode::Enter if app.mode == super::app::AppMode::Comment => {
+                        // Submit comment
+                        let _ = app.submit_comment().await;
+                    }
+                    KeyCode::Enter if app.mode == super::app::AppMode::EditField => {
+                        // Submit edit
+                        let _ = app.submit_edit().await;
+                    }
                     _ => app.handle_key(key_event.code),
                 }
             }
