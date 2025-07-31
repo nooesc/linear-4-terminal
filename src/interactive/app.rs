@@ -14,6 +14,7 @@ pub enum AppMode {
     Edit,
     EditField,
     SelectOption,
+    ExternalEditor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -54,6 +55,7 @@ pub struct InteractiveApp {
     pub option_index: usize,
     pub selected_option: Option<String>,
     pub cursor_position: usize,
+    pub external_editor_field: Option<EditField>,
 }
 
 impl InteractiveApp {
@@ -83,6 +85,7 @@ impl InteractiveApp {
             option_index: 0,
             selected_option: None,
             cursor_position: 0,
+            external_editor_field: None,
         };
         
         app.refresh_issues().await?;
@@ -145,6 +148,7 @@ impl InteractiveApp {
             AppMode::Edit => self.handle_edit_mode_key(key),
             AppMode::EditField => self.handle_edit_field_mode_key(key),
             AppMode::SelectOption => self.handle_select_option_mode_key(key),
+            AppMode::ExternalEditor => {}, // External editor is handled in the main loop
         }
     }
 
@@ -361,7 +365,15 @@ impl InteractiveApp {
                         if let Some(issue) = self.get_selected_issue() {
                             self.edit_input = match self.edit_field {
                                 EditField::Title => issue.title.clone(),
-                                EditField::Description => issue.description.clone().unwrap_or_default(),
+                                EditField::Description => {
+                                    // For description, provide a template if empty
+                                    let desc = issue.description.clone().unwrap_or_default();
+                                    if desc.trim().is_empty() {
+                                        "".to_string() // Start with empty for new descriptions
+                                    } else {
+                                        desc
+                                    }
+                                },
                                 EditField::Assignee => issue.assignee.as_ref().map(|a| a.name.clone()).unwrap_or_default(),
                                 _ => String::new(),
                             };
@@ -384,6 +396,12 @@ impl InteractiveApp {
             }
             KeyCode::Enter => {
                 // Submit edit - will be handled in main loop
+            }
+            KeyCode::Char('\x05') => {
+                // Ctrl+E - launch external editor for description
+                if self.edit_field == EditField::Description {
+                    self.prepare_external_editor();
+                }
             }
             KeyCode::Char(c) => {
                 self.edit_input.insert(self.cursor_position, c);
@@ -458,6 +476,31 @@ impl InteractiveApp {
             }
             _ => {}
         }
+    }
+
+    pub fn prepare_external_editor(&mut self) -> Option<String> {
+        if self.edit_field == EditField::Description {
+            // If edit_input is empty, populate it with current description
+            if self.edit_input.is_empty() {
+                if let Some(issue) = self.get_selected_issue() {
+                    self.edit_input = issue.description.clone().unwrap_or_default();
+                }
+            }
+            
+            self.external_editor_field = Some(self.edit_field);
+            self.mode = AppMode::ExternalEditor;
+            Some(self.edit_input.clone())
+        } else {
+            None
+        }
+    }
+    
+    pub fn handle_external_editor_result(&mut self, content: Option<String>) {
+        if let Some(new_content) = content {
+            self.edit_input = new_content;
+        }
+        self.mode = AppMode::EditField;
+        self.external_editor_field = None;
     }
 
     pub async fn submit_edit(&mut self) -> Result<(), Box<dyn Error>> {

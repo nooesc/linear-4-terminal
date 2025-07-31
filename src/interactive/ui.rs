@@ -20,7 +20,7 @@ pub fn draw(frame: &mut Frame, app: &InteractiveApp) {
     draw_header(frame, chunks[0], app);
     
     match app.mode {
-        AppMode::Detail | AppMode::Comment | AppMode::Edit | AppMode::EditField | AppMode::SelectOption => {
+        AppMode::Detail | AppMode::Comment | AppMode::Edit | AppMode::EditField | AppMode::SelectOption | AppMode::ExternalEditor => {
             if let Some(issue) = app.get_selected_issue() {
                 draw_issue_detail(frame, chunks[1], issue);
             }
@@ -36,6 +36,20 @@ pub fn draw(frame: &mut Frame, app: &InteractiveApp) {
         AppMode::Edit => draw_edit_menu_overlay(frame, frame.size(), app),
         AppMode::EditField => draw_edit_field_overlay(frame, frame.size(), app),
         AppMode::SelectOption => draw_select_option_overlay(frame, frame.size(), app),
+        AppMode::ExternalEditor => {
+            // Show a loading message while external editor is active
+            let loading_area = centered_rect(50, 5, frame.size());
+            frame.render_widget(Clear, loading_area);
+            let loading_block = Block::default()
+                .borders(Borders::ALL)
+                .title(" External Editor ")
+                .border_style(Style::default().fg(Color::Yellow));
+            let loading_text = Paragraph::new("\nEditing in external editor...\nSave and exit to continue.")
+                .block(loading_block)
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(Color::Yellow));
+            frame.render_widget(loading_text, loading_area);
+        }
         _ => {}
     }
 }
@@ -55,6 +69,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
         AppMode::Edit => " Edit Issue ",
         AppMode::EditField => " Edit Field ",
         AppMode::SelectOption => " Select Option ",
+        AppMode::ExternalEditor => " External Editor ",
     };
 
     let header = Paragraph::new(title)
@@ -225,10 +240,17 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
             "[↑/↓] Select Field  [Enter] Edit  [Esc] Cancel"
         }
         AppMode::EditField => {
-            "[Enter] Save  [Esc] Cancel  [←/→] Move cursor  Type to edit..."
+            if let EditField::Description = app.edit_field {
+                "[Enter] Save  [Esc] Cancel  [Ctrl+E] External Editor  [←/→] Move cursor"
+            } else {
+                "[Enter] Save  [Esc] Cancel  [←/→] Move cursor  Type to edit..."
+            }
         }
         AppMode::SelectOption => {
             "[↑/↓] Select  [Enter] Confirm  [Esc/q] Cancel"
+        }
+        AppMode::ExternalEditor => {
+            "Launching external editor..."
         }
     };
 
@@ -411,6 +433,7 @@ fn draw_edit_menu_overlay(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
         let prefix = if index == app.edit_field_index { " › " } else { "   " };
         let suffix = match (name, index) {
             ("Status", _) | ("Priority", _) => " [select]",
+            ("Description", _) => " [Enter or E for editor]",
             ("Assignee", _) => " [coming soon]",
             _ => "",
         };
