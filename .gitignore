@@ -40,3 +40,6 @@ homebrew-formula.rb
 # Release planning docs (internal use)
 RELEASE.md
 homebrew-setup.md
+
+# Logs directory
+logs/
