@@ -15,6 +15,7 @@ pub enum AppMode {
     EditField,
     SelectOption,
     ExternalEditor,
+    Links,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -56,6 +57,8 @@ pub struct InteractiveApp {
     pub selected_option: Option<String>,
     pub cursor_position: usize,
     pub external_editor_field: Option<EditField>,
+    pub current_issue_links: Vec<String>,
+    pub selected_link_index: usize,
 }
 
 impl InteractiveApp {
@@ -86,6 +89,8 @@ impl InteractiveApp {
             selected_option: None,
             cursor_position: 0,
             external_editor_field: None,
+            current_issue_links: Vec::new(),
+            selected_link_index: 0,
         };
         
         app.refresh_issues().await?;
@@ -149,6 +154,7 @@ impl InteractiveApp {
             AppMode::EditField => self.handle_edit_field_mode_key(key),
             AppMode::SelectOption => self.handle_select_option_mode_key(key),
             AppMode::ExternalEditor => {}, // External editor is handled in the main loop
+            AppMode::Links => self.handle_links_mode_key(key),
         }
     }
 
@@ -160,9 +166,28 @@ impl InteractiveApp {
             KeyCode::Char('g') => self.toggle_group_by(),
             KeyCode::Char('/') => self.mode = AppMode::Search,
             KeyCode::Char('f') => self.mode = AppMode::Filter,
+            KeyCode::Char('o') => {
+                // Open current issue in Linear
+                if let Some(issue) = self.get_selected_issue() {
+                    let _ = self.open_link(&issue.url);
+                }
+            }
+            KeyCode::Char('e') => {
+                // Edit current issue
+                if let Some(issue) = self.get_selected_issue() {
+                    self.selected_issue_id = Some(issue.id.clone());
+                    self.edit_field_index = 0;
+                    self.mode = AppMode::Edit;
+                }
+            }
             KeyCode::Enter => {
                 if !self.filtered_issues.is_empty() {
                     self.mode = AppMode::Detail;
+                    // Update current issue links
+                    if let Some(issue) = self.get_selected_issue() {
+                        self.current_issue_links = super::ui::get_issue_links(issue);
+                        self.selected_link_index = 0;
+                    }
                 }
             }
             KeyCode::Char('r') => {
@@ -222,6 +247,26 @@ impl InteractiveApp {
                     self.selected_issue_id = Some(issue.id.clone());
                     self.edit_field_index = 0;
                     self.mode = AppMode::Edit;
+                }
+            }
+            KeyCode::Char('o') => {
+                // Open Linear issue URL
+                if !self.current_issue_links.is_empty() {
+                    let _ = self.open_link(&self.current_issue_links[0]);
+                }
+            }
+            KeyCode::Char('l') => {
+                // Enter links navigation mode
+                if self.current_issue_links.len() > 1 {
+                    self.selected_link_index = 0;
+                    self.mode = AppMode::Links;
+                }
+            }
+            KeyCode::Char(c) if c.is_digit(10) => {
+                // Open numbered link
+                let index = c.to_digit(10).unwrap() as usize;
+                if index < self.current_issue_links.len() {
+                    let _ = self.open_link(&self.current_issue_links[index]);
                 }
             }
             _ => {}
@@ -299,6 +344,22 @@ impl InteractiveApp {
 
     pub fn get_selected_issue(&self) -> Option<&Issue> {
         self.filtered_issues.get(self.selected_index)
+    }
+    
+    fn open_link(&self, url: &str) -> Result<(), Box<dyn Error>> {
+        #[cfg(target_os = "macos")]
+        let cmd = "open";
+        #[cfg(target_os = "windows")]
+        let cmd = "start";
+        #[cfg(target_os = "linux")]
+        let cmd = "xdg-open";
+        
+        std::process::Command::new(cmd)
+            .arg(url)
+            .spawn()
+            .map_err(|e| format!("Failed to open link: {}", e))?;
+        
+        Ok(())
     }
 
     pub async fn submit_comment(&mut self) -> Result<(), Box<dyn Error>> {
@@ -473,6 +534,30 @@ impl InteractiveApp {
                     _ => {}
                 }
                 // Submit will be handled in main loop
+            }
+            _ => {}
+        }
+    }
+    
+    fn handle_links_mode_key(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.mode = AppMode::Detail;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.selected_link_index > 0 {
+                    self.selected_link_index -= 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if self.selected_link_index < self.current_issue_links.len().saturating_sub(1) {
+                    self.selected_link_index += 1;
+                }
+            }
+            KeyCode::Enter | KeyCode::Char('o') => {
+                if let Some(link) = self.current_issue_links.get(self.selected_link_index) {
+                    let _ = self.open_link(link);
+                }
             }
             _ => {}
         }

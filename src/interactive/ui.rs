@@ -1,11 +1,129 @@
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
+    text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
     Frame,
 };
 use crate::models::Issue;
 use super::app::{AppMode, EditField, GroupBy, InteractiveApp};
+
+#[derive(Debug)]
+struct ColumnWidths {
+    id: usize,
+    priority: usize,
+    title: usize,
+    status: usize,
+    assignee: usize,
+    labels: usize,
+    links: usize,
+    // Visibility flags
+    show_assignee: bool,
+    show_labels: bool,
+    show_links: bool,
+    labels_as_count: bool,
+}
+
+fn calculate_column_widths(available_width: u16) -> ColumnWidths {
+    let width = available_width as usize;
+    
+    // Minimum widths
+    const MIN_ID: usize = 7;
+    const MIN_PRIORITY: usize = 2;
+    const MIN_TITLE: usize = 20;
+    const MIN_STATUS: usize = 8;
+    const MIN_ASSIGNEE: usize = 10;
+    const MIN_LABELS: usize = 6;  // For count display "[2]"
+    const MIN_LINKS: usize = 3;
+    
+    // Fixed widths
+    let priority_width = 3; // 2 + space
+    
+    // Calculate based on terminal width
+    if width < 80 {
+        // Ultra narrow - only essentials
+        ColumnWidths {
+            id: MIN_ID,
+            priority: priority_width,
+            title: width.saturating_sub(MIN_ID + priority_width + MIN_STATUS + 4), // 4 for borders/padding
+            status: MIN_STATUS,
+            assignee: 0,
+            labels: 0,
+            links: 0,
+            show_assignee: false,
+            show_labels: false,
+            show_links: false,
+            labels_as_count: false,
+        }
+    } else if width < 100 {
+        // Narrow - add assignee
+        let essential_width = MIN_ID + priority_width + MIN_STATUS + MIN_ASSIGNEE + 5;
+        ColumnWidths {
+            id: MIN_ID,
+            priority: priority_width,
+            title: width.saturating_sub(essential_width),
+            status: MIN_STATUS,
+            assignee: MIN_ASSIGNEE,
+            labels: 0,
+            links: 0,
+            show_assignee: true,
+            show_labels: false,
+            show_links: false,
+            labels_as_count: false,
+        }
+    } else if width < 120 {
+        // Medium - add labels as count
+        let essential_width = MIN_ID + priority_width + MIN_STATUS + MIN_ASSIGNEE + MIN_LABELS + 6;
+        ColumnWidths {
+            id: 8,
+            priority: priority_width,
+            title: width.saturating_sub(essential_width),
+            status: 10,
+            assignee: 12,
+            labels: MIN_LABELS,
+            links: 0,
+            show_assignee: true,
+            show_labels: true,
+            show_links: false,
+            labels_as_count: true,
+        }
+    } else if width < 160 {
+        // Wide - show labels normally
+        let essential_width = MIN_ID + priority_width + 12 + 12 + 15 + MIN_LINKS + 7;
+        ColumnWidths {
+            id: 9,
+            priority: priority_width,
+            title: width.saturating_sub(essential_width),
+            status: 12,
+            assignee: 12,
+            labels: 15,
+            links: MIN_LINKS,
+            show_assignee: true,
+            show_labels: true,
+            show_links: true,
+            labels_as_count: false,
+        }
+    } else {
+        // Extra wide - generous spacing
+        let used_width = 10 + priority_width + 15 + 15 + 20 + 4 + 8;
+        let remaining = width.saturating_sub(used_width);
+        let title_width = remaining.min(80); // Cap title width for readability
+        
+        ColumnWidths {
+            id: 10,
+            priority: priority_width,
+            title: title_width,
+            status: 15,
+            assignee: 15,
+            labels: 20,
+            links: 4,
+            show_assignee: true,
+            show_labels: true,
+            show_links: true,
+            labels_as_count: false,
+        }
+    }
+}
 
 pub fn draw(frame: &mut Frame, app: &InteractiveApp) {
     let chunks = Layout::default()
@@ -20,9 +138,9 @@ pub fn draw(frame: &mut Frame, app: &InteractiveApp) {
     draw_header(frame, chunks[0], app);
     
     match app.mode {
-        AppMode::Detail | AppMode::Comment | AppMode::Edit | AppMode::EditField | AppMode::SelectOption | AppMode::ExternalEditor => {
+        AppMode::Detail | AppMode::Comment | AppMode::Edit | AppMode::EditField | AppMode::SelectOption | AppMode::ExternalEditor | AppMode::Links => {
             if let Some(issue) = app.get_selected_issue() {
-                draw_issue_detail(frame, chunks[1], issue);
+                draw_issue_detail(frame, chunks[1], issue, app);
             }
         }
         _ => draw_issues_list(frame, chunks[1], app),
@@ -70,6 +188,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
         AppMode::EditField => " Edit Field ",
         AppMode::SelectOption => " Select Option ",
         AppMode::ExternalEditor => " External Editor ",
+        AppMode::Links => " Navigate Links ",
     };
 
     let header = Paragraph::new(title)
@@ -122,29 +241,157 @@ fn draw_issues_list(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
         return;
     }
 
-    let items: Vec<ListItem> = app.filtered_issues
-        .iter()
-        .enumerate()
-        .map(|(i, issue)| {
-            let selected = i == app.selected_index;
-            let content = format!(
-                "{:<10} {:<50} {:<12} {}",
-                issue.identifier,
-                truncate(&issue.title, 50),
-                issue.state.name,
-                issue.assignee.as_ref()
-                    .map(|a| a.name.split_whitespace().next().unwrap_or(&a.name))
-                    .unwrap_or("Unassigned")
-            );
-            
-            let style = if selected {
-                Style::default().bg(Color::DarkGray).fg(Color::White).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            };
-            
-            ListItem::new(content).style(style)
-        })
+    // Calculate column widths based on available space
+    let inner_width = area.width.saturating_sub(2); // Account for borders
+    let col_widths = calculate_column_widths(inner_width);
+    
+    // Build dynamic header
+    let header_style = Style::default().fg(Color::Gray).add_modifier(Modifier::UNDERLINED);
+    let mut header = format!("{:<width$} {:<2}", "ID", "P", width = col_widths.id);
+    header.push_str(&format!(" {:<width$}", "Title", width = col_widths.title));
+    header.push_str(&format!(" {:<width$}", "Status", width = col_widths.status));
+    
+    if col_widths.show_assignee {
+        header.push_str(&format!(" {:<width$}", "Assignee", width = col_widths.assignee));
+    }
+    if col_widths.show_labels {
+        let label_header = if col_widths.labels_as_count { "Lbl" } else { "Labels" };
+        header.push_str(&format!(" {:<width$}", label_header, width = col_widths.labels));
+    }
+    if col_widths.show_links {
+        header.push_str(" 🔗");
+    }
+    
+    let header_item = ListItem::new(header).style(header_style);
+    
+    let items: Vec<ListItem> = std::iter::once(header_item)
+        .chain(app.filtered_issues
+            .iter()
+            .enumerate()
+            .map(|(i, issue)| {
+                let selected = i == app.selected_index;
+                
+                // Get priority symbol and color
+                let (priority_symbol, priority_color) = match issue.priority {
+                    Some(0) => (" ", Color::Gray),
+                    Some(1) => ("◦", Color::Blue),
+                    Some(2) => ("•", Color::Yellow),
+                    Some(3) => ("■", Color::Rgb(255, 165, 0)), // Orange
+                    Some(4) => ("▲", Color::Red),
+                    _ => (" ", Color::Gray),
+                };
+                
+                // Get status color based on state type
+                let status_color = match issue.state.state_type.as_str() {
+                    "backlog" => Color::Gray,
+                    "unstarted" => Color::LightBlue,
+                    "started" => Color::Yellow,
+                    "completed" => Color::Green,
+                    "canceled" => Color::DarkGray,
+                    _ => Color::White,
+                };
+                
+                // Format labels with colors
+                let labels_str = if issue.labels.nodes.is_empty() {
+                    String::new()
+                } else {
+                    issue.labels.nodes.iter()
+                        .take(2)  // Show max 2 labels
+                        .map(|l| l.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
+                
+                let assignee_name = issue.assignee.as_ref()
+                    .map(|a| parse_assignee_name(a))
+                    .unwrap_or_else(|| "Unassigned".to_string());
+                
+                // Create styled spans for different parts
+                // Build row with dynamic widths
+                let id_span = ratatui::text::Span::styled(
+                    format!("{:<width$}", truncate_id(&issue.identifier, col_widths.id), width = col_widths.id),
+                    if selected { Style::default().bg(Color::DarkGray) } else { Style::default() }
+                );
+                
+                let priority_span = ratatui::text::Span::styled(
+                    format!(" {} ", priority_symbol),
+                    if selected { 
+                        Style::default().bg(Color::DarkGray).fg(priority_color) 
+                    } else { 
+                        Style::default().fg(priority_color) 
+                    }
+                );
+                
+                let title_span = ratatui::text::Span::styled(
+                    format!("{:<width$}", truncate(&issue.title, col_widths.title), width = col_widths.title),
+                    if selected { Style::default().bg(Color::DarkGray).fg(Color::White) } else { Style::default() }
+                );
+                
+                let status_span = ratatui::text::Span::styled(
+                    format!("{:<width$}", truncate(&issue.state.name, col_widths.status), width = col_widths.status),
+                    if selected { 
+                        Style::default().bg(Color::DarkGray).fg(status_color).add_modifier(Modifier::BOLD) 
+                    } else { 
+                        Style::default().fg(status_color) 
+                    }
+                );
+                
+                // Build dynamic row spans
+                let mut spans = vec![id_span, priority_span, title_span, status_span];
+                
+                // Add optional columns
+                if col_widths.show_assignee {
+                    let assignee_span = ratatui::text::Span::styled(
+                        format!("{:<width$}", truncate(&assignee_name, col_widths.assignee), width = col_widths.assignee),
+                        if selected { Style::default().bg(Color::DarkGray).fg(Color::Cyan) } else { Style::default().fg(Color::Cyan) }
+                    );
+                    spans.push(assignee_span);
+                }
+                
+                if col_widths.show_labels {
+                    let labels_display = if col_widths.labels_as_count {
+                        // Show label count
+                        if issue.labels.nodes.is_empty() {
+                            "   ".to_string()
+                        } else {
+                            format!("[{}]", issue.labels.nodes.len())
+                        }
+                    } else {
+                        // Show label names
+                        labels_str.clone()
+                    };
+                    
+                    let labels_span = ratatui::text::Span::styled(
+                        format!("{:<width$}", truncate(&labels_display, col_widths.labels), width = col_widths.labels),
+                        if selected { Style::default().bg(Color::DarkGray).fg(Color::Magenta) } else { Style::default().fg(Color::Magenta) }
+                    );
+                    spans.push(labels_span);
+                }
+                
+                if col_widths.show_links {
+                    // Get links count (excluding the Linear URL itself)
+                    let links = get_issue_links(issue);
+                    let extra_links_count = if links.len() > 1 { links.len() - 1 } else { 0 };
+                    let links_text = if extra_links_count > 0 {
+                        format!(" {} ", extra_links_count)
+                    } else {
+                        "   ".to_string()
+                    };
+                    
+                    let links_span = ratatui::text::Span::styled(
+                        links_text,
+                        if selected { 
+                            Style::default().bg(Color::DarkGray).fg(Color::Blue) 
+                        } else { 
+                            Style::default().fg(Color::Blue) 
+                        }
+                    );
+                    spans.push(links_span);
+                }
+                
+                let line = ratatui::text::Line::from(spans);
+                ListItem::new(line)
+            }))
         .collect();
 
     let list = List::new(items)
@@ -164,14 +411,30 @@ fn draw_issues_list(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
     }
 }
 
-fn draw_issue_detail(frame: &mut Frame, area: Rect, issue: &Issue) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
+fn draw_issue_detail(frame: &mut Frame, area: Rect, issue: &Issue, app: &InteractiveApp) {
+    let links = get_issue_links(issue);
+    let has_links = links.len() > 1; // More than just the Linear URL
+    
+    let constraints = if has_links {
+        // Limit links section to max 12 lines (header + 10 links + scroll indicator)
+        let links_height = (3 + links.len() as u16).min(12);
+        vec![
             Constraint::Length(4),   // Title
             Constraint::Length(3),   // Metadata
             Constraint::Min(10),     // Description
-        ])
+            Constraint::Length(links_height), // Links section with max height
+        ]
+    } else {
+        vec![
+            Constraint::Length(4),   // Title
+            Constraint::Length(3),   // Metadata
+            Constraint::Min(10),     // Description
+        ]
+    };
+    
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
         .split(area);
 
     // Title
@@ -184,29 +447,54 @@ fn draw_issue_detail(frame: &mut Frame, area: Rect, issue: &Issue) {
         .wrap(Wrap { trim: true });
     frame.render_widget(title, chunks[0]);
 
-    // Metadata
-    let metadata = vec![
-        format!("State: {} | ", issue.state.name),
-        format!("Assignee: {} | ", 
+    // Metadata with colored elements
+    let status_color = match issue.state.state_type.as_str() {
+        "backlog" => Color::Gray,
+        "unstarted" => Color::LightBlue,
+        "started" => Color::Yellow,
+        "completed" => Color::Green,
+        "canceled" => Color::DarkGray,
+        _ => Color::White,
+    };
+    
+    let (priority_name, priority_color) = match issue.priority {
+        Some(0) => ("None", Color::Gray),
+        Some(1) => ("Low", Color::Blue),
+        Some(2) => ("Medium", Color::Yellow),
+        Some(3) => ("High", Color::Rgb(255, 165, 0)),
+        Some(4) => ("Urgent", Color::Red),
+        _ => ("Unknown", Color::Gray),
+    };
+    
+    let mut metadata_spans = vec![
+        Span::raw("State: "),
+        Span::styled(&issue.state.name, Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+        Span::raw(" | Assignee: "),
+        Span::styled(
             issue.assignee.as_ref()
-                .map(|a| a.name.as_str())
-                .unwrap_or("Unassigned")
+                .map(|a| parse_assignee_name(a))
+                .unwrap_or_else(|| "Unassigned".to_string()),
+            Style::default().fg(Color::Cyan)
         ),
-        format!("Team: {} | ", issue.team.name),
-        format!("Priority: {}", 
-            match issue.priority {
-                Some(0) => "None",
-                Some(1) => "Low",
-                Some(2) => "Medium",
-                Some(3) => "High",
-                Some(4) => "Urgent",
-                _ => "Unknown",
-            }
-        ),
+        Span::raw(" | Team: "),
+        Span::styled(&issue.team.name, Style::default().fg(Color::LightGreen)),
+        Span::raw(" | Priority: "),
+        Span::styled(priority_name, Style::default().fg(priority_color).add_modifier(Modifier::BOLD)),
     ];
-    let metadata_text = metadata.join("");
-    let metadata_widget = Paragraph::new(metadata_text)
-        .style(Style::default().fg(Color::Gray))
+    
+    if !issue.labels.nodes.is_empty() {
+        metadata_spans.push(Span::raw(" | Labels: "));
+        for (i, label) in issue.labels.nodes.iter().enumerate() {
+            if i > 0 {
+                metadata_spans.push(Span::raw(", "));
+            }
+            metadata_spans.push(Span::styled(&label.name, Style::default().fg(Color::Magenta)));
+        }
+    }
+    
+    let metadata_line = Line::from(metadata_spans);
+    let metadata_widget = Paragraph::new(vec![metadata_line])
+        .style(Style::default())
         .block(Block::default().borders(Borders::ALL));
     frame.render_widget(metadata_widget, chunks[1]);
 
@@ -217,12 +505,102 @@ fn draw_issue_detail(frame: &mut Frame, area: Rect, issue: &Issue) {
         .block(Block::default().borders(Borders::ALL).title(" Description "))
         .wrap(Wrap { trim: true });
     frame.render_widget(desc_widget, chunks[2]);
+    
+    // Links section (if there are links beyond the Linear URL)
+    if has_links {
+        let mut link_lines = vec![];
+        
+        // Calculate available height for links (subtract 2 for header, 1 for border)
+        let available_height = chunks[3].height.saturating_sub(3) as usize;
+        let max_visible_links = available_height.saturating_sub(1); // Reserve space for navigation help
+        
+        if app.mode == AppMode::Links {
+            link_lines.push(Line::from(Span::styled("Navigate with j/k or ↑/↓, Enter to open, Esc to exit", Style::default().fg(Color::Gray))));
+        } else {
+            link_lines.push(Line::from(Span::styled("Press 'l' to navigate links, 'o' for Linear, or number keys:", Style::default().fg(Color::Gray))));
+        }
+        link_lines.push(Line::from(""));
+        
+        // Calculate visible range with scrolling
+        let selected_idx = if app.mode == AppMode::Links { app.selected_link_index } else { 0 };
+        let half_visible = max_visible_links / 2;
+        
+        let (start_idx, end_idx) = if links.len() <= max_visible_links {
+            // All links fit
+            (0, links.len())
+        } else {
+            // Need scrolling
+            let start = if selected_idx < half_visible {
+                0
+            } else if selected_idx > links.len() - half_visible {
+                links.len().saturating_sub(max_visible_links)
+            } else {
+                selected_idx.saturating_sub(half_visible)
+            };
+            (start, (start + max_visible_links).min(links.len()))
+        };
+        
+        // Add scroll indicator at top
+        if start_idx > 0 {
+            link_lines.push(Line::from(Span::styled(
+                format!("    ↑ {} more", start_idx),
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)
+            )));
+        }
+        
+        // Show visible links
+        for i in start_idx..end_idx {
+            let link = &links[i];
+            let link_text = if i == 0 {
+                format!("[o] Linear: {}", truncate(link, 60))
+            } else if i < 10 {
+                format!("[{}] {}", i, truncate(link, 60))
+            } else {
+                format!("    {}", truncate(link, 60))
+            };
+            
+            let is_selected = app.mode == AppMode::Links && i == app.selected_link_index;
+            let style = if is_selected {
+                Style::default().bg(Color::DarkGray).fg(Color::White).add_modifier(Modifier::BOLD)
+            } else if i == 0 {
+                Style::default().fg(Color::Cyan)
+            } else {
+                Style::default().fg(Color::Blue)
+            };
+            
+            link_lines.push(Line::from(Span::styled(link_text, style)));
+        }
+        
+        // Add scroll indicator at bottom
+        if end_idx < links.len() {
+            link_lines.push(Line::from(Span::styled(
+                format!("    ↓ {} more", links.len() - end_idx),
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)
+            )));
+        }
+        
+        let border_style = if app.mode == AppMode::Links {
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        
+        let title = if links.len() > max_visible_links && app.mode == AppMode::Links {
+            format!(" Links ({}/{}) ", selected_idx + 1, links.len())
+        } else {
+            " Links ".to_string()
+        };
+        
+        let links_widget = Paragraph::new(link_lines)
+            .block(Block::default().borders(Borders::ALL).title(title).border_style(border_style));
+        frame.render_widget(links_widget, chunks[3]);
+    }
 }
 
 fn draw_footer(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
     let help_text = match app.mode {
         AppMode::Normal => {
-            "[q] Quit  [j/k] Navigate  [Enter] View  [/] Search  [g] Toggle Group  [r] Refresh"
+            "[q] Quit  [j/k] Nav  [Enter] View  [e] Edit  [o] Open  [/] Search  [g] Group  [r] Refresh"
         }
         AppMode::Search => {
             "[Esc] Cancel  [Enter] Apply  Type to search..."
@@ -231,7 +609,7 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
             "[Esc] Back  [Enter] Apply Filter"
         }
         AppMode::Detail => {
-            "[Esc/q] Back  [e] Edit  [c] Comment"
+            "[Esc/q] Back  [e] Edit  [c] Comment  [o] Open Linear  [l] Navigate links  [0-9] Quick open"
         }
         AppMode::Comment => {
             "[Esc] Cancel  [Enter] Submit  Type your comment..."
@@ -251,6 +629,9 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
         }
         AppMode::ExternalEditor => {
             "Launching external editor..."
+        }
+        AppMode::Links => {
+            "[j/k or ↑/↓] Navigate  [Enter/o] Open link  [Esc/q] Back"
         }
     };
 
@@ -432,9 +813,8 @@ fn draw_edit_menu_overlay(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
         
         let prefix = if index == app.edit_field_index { " › " } else { "   " };
         let suffix = match (name, index) {
-            ("Status", _) | ("Priority", _) => " [select]",
+            ("Status", _) | ("Priority", _) | ("Assignee", _) => " [select]",
             ("Description", _) => " [Enter or E for editor]",
-            ("Assignee", _) => " [coming soon]",
             _ => "",
         };
         
@@ -641,4 +1021,71 @@ fn truncate(s: &str, max_width: usize) -> String {
     } else {
         format!("{}...", &s[..max_width - 3])
     }
+}
+
+fn truncate_id(id: &str, max_width: usize) -> String {
+    if id.len() <= max_width {
+        id.to_string()
+    } else {
+        // Try to extract just the number part for very narrow displays
+        if let Some(dash_pos) = id.find('-') {
+            let number_part = &id[dash_pos + 1..];
+            if number_part.len() <= max_width {
+                return number_part.to_string();
+            }
+        }
+        truncate(id, max_width)
+    }
+}
+
+fn parse_assignee_name(user: &crate::models::User) -> String {
+    // First try to extract username from email
+    if let Some(username) = user.email.split('@').next() {
+        if !username.is_empty() {
+            return username.to_string();
+        }
+    }
+    
+    // Otherwise, try to get first name
+    if let Some(first_name) = user.name.split_whitespace().next() {
+        if !first_name.is_empty() {
+            return first_name.to_string();
+        }
+    }
+    
+    // Fallback to full name
+    user.name.clone()
+}
+
+fn extract_links_from_text(text: &str) -> Vec<String> {
+    let mut links = Vec::new();
+    
+    // Match URLs (http/https)
+    let url_regex = regex::Regex::new(r#"https?://[^\s<>"{}|\\^`\[\]]+"#).unwrap();
+    for capture in url_regex.captures_iter(text) {
+        links.push(capture[0].to_string());
+    }
+    
+    // Match markdown links [text](url)
+    let md_link_regex = regex::Regex::new(r#"\[([^\]]+)\]\(([^)]+)\)"#).unwrap();
+    for capture in md_link_regex.captures_iter(text) {
+        if let Some(url) = capture.get(2) {
+            links.push(url.as_str().to_string());
+        }
+    }
+    
+    links
+}
+
+pub fn get_issue_links(issue: &crate::models::Issue) -> Vec<String> {
+    let mut all_links = vec![issue.url.clone()]; // Always include the Linear URL
+    
+    if let Some(desc) = &issue.description {
+        all_links.extend(extract_links_from_text(desc));
+    }
+    
+    // Deduplicate
+    all_links.sort();
+    all_links.dedup();
+    all_links
 }
