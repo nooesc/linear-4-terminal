@@ -34,7 +34,7 @@ fn calculate_column_widths(available_width: u16) -> ColumnWidths {
     // Minimum widths
     const MIN_ID: usize = 7;
     const MIN_PRIORITY: usize = 2;
-    const MIN_TITLE: usize = 15;  // Reduced from 20
+    const MIN_TITLE: usize = 10;  // Further reduced
     const MIN_PROJECT: usize = 8;
     const MIN_LABELS: usize = 10;
     const MIN_STATUS: usize = 8;
@@ -51,7 +51,7 @@ fn calculate_column_widths(available_width: u16) -> ColumnWidths {
         ColumnWidths {
             id: MIN_ID,
             priority: priority_width,
-            title: width.saturating_sub(MIN_ID + priority_width + MIN_STATUS + MIN_AGE + 5), // 5 for borders/padding
+            title: width.saturating_sub(MIN_ID + priority_width + MIN_STATUS + MIN_AGE + 5).min(20), // Cap at 20
             project: 0,
             labels: 0,
             status: MIN_STATUS,
@@ -70,7 +70,7 @@ fn calculate_column_widths(available_width: u16) -> ColumnWidths {
         ColumnWidths {
             id: MIN_ID,
             priority: priority_width,
-            title: width.saturating_sub(essential_width).max(MIN_TITLE),
+            title: width.saturating_sub(essential_width).max(MIN_TITLE).min(25), // Cap at 25
             project: MIN_PROJECT,
             labels: 0,
             status: MIN_STATUS,
@@ -85,11 +85,14 @@ fn calculate_column_widths(available_width: u16) -> ColumnWidths {
         }
     } else if width < 120 {
         // Medium - add labels
-        let essential_width = MIN_ID + priority_width + MIN_STATUS + MIN_PROJECT + MIN_LABELS + MIN_AGE + 7;
+        let fixed_width = 8 + priority_width + MIN_PROJECT + MIN_LABELS + 10 + MIN_AGE + 7;
+        let remaining = width.saturating_sub(fixed_width);
+        let title_width = remaining.min(35).max(MIN_TITLE);
+        
         ColumnWidths {
             id: 8,
             priority: priority_width,
-            title: width.saturating_sub(essential_width).max(MIN_TITLE),
+            title: title_width,
             project: MIN_PROJECT,
             labels: MIN_LABELS,
             status: 10,
@@ -103,18 +106,21 @@ fn calculate_column_widths(available_width: u16) -> ColumnWidths {
             show_age: true,
         }
     } else if width < 150 {
-        // Wide - add assignee
-        let essential_width = MIN_ID + priority_width + 10 + 12 + 12 + MIN_ASSIGNEE + MIN_AGE + 8;
+        // Wide - add assignee (better optimized for 140 width)
+        let fixed_width = 9 + priority_width + 12 + 15 + 12 + 12 + 6 + 8; // id + p + project + labels + status + assignee + age + spaces
+        let remaining = width.saturating_sub(fixed_width);
+        let title_width = remaining.min(40).max(20); // Use more of the remaining space
+        
         ColumnWidths {
             id: 9,
             priority: priority_width,
-            title: width.saturating_sub(essential_width).max(20),
-            project: 10,
-            labels: 12,
+            title: title_width,
+            project: 12,
+            labels: 15,
             status: 12,
-            assignee: MIN_ASSIGNEE,
+            assignee: 12,
             links: 0,
-            age: MIN_AGE,
+            age: 6,
             show_project: true,
             show_labels: true,
             show_assignee: true,
@@ -127,7 +133,7 @@ fn calculate_column_widths(available_width: u16) -> ColumnWidths {
         ColumnWidths {
             id: 10,
             priority: priority_width,
-            title: width.saturating_sub(essential_width).max(25),
+            title: width.saturating_sub(essential_width).max(20).min(40), // Cap at 40
             project: 12,
             labels: 15,
             status: 15,
@@ -141,19 +147,26 @@ fn calculate_column_widths(available_width: u16) -> ColumnWidths {
             show_age: true,
         }
     } else {
-        // Extra wide - generous spacing
-        let used_width = 10 + priority_width + 15 + 20 + 15 + 15 + 4 + 6 + 10;
-        let remaining = width.saturating_sub(used_width);
-        let title_width = remaining.min(50).max(30); // Cap title width for readability, reduced from 80
+        // Extra wide - better space distribution
+        // First calculate minimum fixed columns
+        let fixed_columns = 10 + priority_width + 4 + 6 + 11; // id + priority + links + age + spaces
+        
+        // Distribute remaining space proportionally
+        let available = width.saturating_sub(fixed_columns);
+        let project_width = (available as f32 * 0.15) as usize;
+        let labels_width = (available as f32 * 0.20) as usize;
+        let status_width = (available as f32 * 0.15) as usize;
+        let assignee_width = (available as f32 * 0.15) as usize;
+        let title_width = available.saturating_sub(project_width + labels_width + status_width + assignee_width);
         
         ColumnWidths {
             id: 10,
             priority: priority_width,
-            title: title_width,
-            project: 15,
-            labels: 20,
-            status: 15,
-            assignee: 15,
+            title: title_width.max(30), // Ensure minimum title width
+            project: project_width.max(12),
+            labels: labels_width.max(15),
+            status: status_width.max(12),
+            assignee: assignee_width.max(12),
             links: 4,
             age: 6,
             show_project: true,
@@ -219,7 +232,14 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
         .split(area);
 
     let title = match app.mode {
-        AppMode::Normal => " Linear Interactive Mode ".to_string(),
+        AppMode::Normal => {
+            // Show selected issue title in normal mode too
+            if let Some(issue) = app.get_selected_issue() {
+                format!(" {} - {} ", issue.identifier, truncate(&issue.title, (header_chunks[0].width as usize).saturating_sub(issue.identifier.len() + 6)))
+            } else {
+                " Linear Interactive Mode ".to_string()
+            }
+        },
         AppMode::Search => " Search Mode ".to_string(),
         AppMode::Filter => " Filter Mode ".to_string(),
         AppMode::Detail | AppMode::Comment | AppMode::Edit | AppMode::EditField | AppMode::SelectOption | AppMode::Links => {

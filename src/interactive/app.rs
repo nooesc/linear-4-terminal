@@ -79,7 +79,7 @@ impl InteractiveApp {
             filter_query: String::new(),
             should_quit: false,
             client,
-            loading: false,
+            loading: true,
             error_message: None,
             comment_input: String::new(),
             comment_cursor_position: 0,
@@ -98,8 +98,27 @@ impl InteractiveApp {
             selected_link_index: 0,
         };
         
-        app.refresh_issues().await?;
-        match app.client.get_workflow_states().await {
+        // Make all three API calls in parallel for faster startup
+        let (issues_result, states_result, labels_result) = tokio::join!(
+            app.client.get_issues(None, Some(100)),
+            app.client.get_workflow_states(),
+            app.client.get_labels()
+        );
+        
+        // Handle issues result
+        match issues_result {
+            Ok(issues) => {
+                app.issues = issues;
+                app.apply_filters();
+            }
+            Err(e) => {
+                app.error_message = Some(format!("Failed to load issues: {}", e));
+                return Err(e);
+            }
+        }
+        
+        // Handle workflow states result
+        match states_result {
             Ok(states) => {
                 app.workflow_states = states;
             }
@@ -108,7 +127,9 @@ impl InteractiveApp {
                 app.workflow_states = Vec::new();
             }
         }
-        match app.client.get_labels().await {
+        
+        // Handle labels result
+        match labels_result {
             Ok(labels) => {
                 app.available_labels = labels;
             }
@@ -117,6 +138,8 @@ impl InteractiveApp {
                 app.available_labels = Vec::new();
             }
         }
+        
+        app.loading = false;
         Ok(app)
     }
 
