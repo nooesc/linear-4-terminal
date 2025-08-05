@@ -510,6 +510,29 @@ impl LinearClient {
         Ok(data.workflow_states.nodes)
     }
 
+    pub async fn get_labels(&self) -> Result<Vec<crate::models::issue::Label>, Box<dyn std::error::Error>> {
+        let query = r#"
+            query {
+                issueLabels(first: 100) {
+                    nodes {
+                        id
+                        name
+                        color
+                    }
+                }
+            }
+        "#;
+        
+        #[derive(Debug, Deserialize)]
+        struct LabelsData {
+            #[serde(rename = "issueLabels")]
+            issue_labels: Connection<crate::models::issue::Label>,
+        }
+        
+        let data: LabelsData = self.execute_query(query, None).await?;
+        Ok(data.issue_labels.nodes)
+    }
+
     pub async fn move_issue(
         &self,
         issue_id: &str,

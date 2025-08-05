@@ -31,6 +31,7 @@ pub enum EditField {
     Status,
     Assignee,
     Priority,
+    Labels,
 }
 
 pub struct InteractiveApp {
@@ -53,6 +54,8 @@ pub struct InteractiveApp {
     pub edit_input: String,
     pub edit_field_index: usize,
     pub workflow_states: Vec<WorkflowState>,
+    pub available_labels: Vec<crate::models::issue::Label>,
+    pub selected_labels: Vec<String>, // IDs of selected labels
     pub option_index: usize,
     pub selected_option: Option<String>,
     pub cursor_position: usize,
@@ -85,6 +88,8 @@ impl InteractiveApp {
             edit_input: String::new(),
             edit_field_index: 0,
             workflow_states: Vec::new(),
+            available_labels: Vec::new(),
+            selected_labels: Vec::new(),
             option_index: 0,
             selected_option: None,
             cursor_position: 0,
@@ -101,6 +106,15 @@ impl InteractiveApp {
             Err(e) => {
                 eprintln!("Failed to fetch workflow states: {}", e);
                 app.workflow_states = Vec::new();
+            }
+        }
+        match app.client.get_labels().await {
+            Ok(labels) => {
+                app.available_labels = labels;
+            }
+            Err(e) => {
+                eprintln!("Failed to fetch labels: {}", e);
+                app.available_labels = Vec::new();
             }
         }
         Ok(app)
@@ -137,6 +151,25 @@ impl InteractiveApp {
             });
         }
         
+        // Apply sorting based on group_by
+        match self.group_by {
+            GroupBy::Status => {
+                self.filtered_issues.sort_by(|a, b| {
+                    a.state.name.cmp(&b.state.name)
+                        .then(a.priority.cmp(&b.priority).reverse())
+                });
+            }
+            GroupBy::Project => {
+                self.filtered_issues.sort_by(|a, b| {
+                    let a_project = a.project.as_ref().map(|p| &p.name);
+                    let b_project = b.project.as_ref().map(|p| &p.name);
+                    a_project.cmp(&b_project)
+                        .then(a.state.name.cmp(&b.state.name))
+                        .then(a.priority.cmp(&b.priority).reverse())
+                });
+            }
+        }
+        
         // Reset selection if needed
         if self.selected_index >= self.filtered_issues.len() && !self.filtered_issues.is_empty() {
             self.selected_index = self.filtered_issues.len() - 1;
@@ -160,7 +193,7 @@ impl InteractiveApp {
 
     fn handle_normal_mode_key(&mut self, key: KeyCode) {
         match key {
-            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
             KeyCode::Char('j') | KeyCode::Down => self.move_selection_down(),
             KeyCode::Char('k') | KeyCode::Up => self.move_selection_up(),
             KeyCode::Char('g') => self.toggle_group_by(),
@@ -192,6 +225,41 @@ impl InteractiveApp {
             }
             KeyCode::Char('r') => {
                 // Refresh issues - handled in main loop
+            }
+            KeyCode::Char('s') => {
+                // Quick edit status
+                if let Some(issue) = self.get_selected_issue() {
+                    self.selected_issue_id = Some(issue.id.clone());
+                    self.edit_field = EditField::Status;
+                    self.option_index = 0;
+                    self.selected_option = None;
+                    self.mode = AppMode::SelectOption;
+                }
+            }
+            KeyCode::Char('c') => {
+                // Quick comment
+                if let Some(issue) = self.get_selected_issue() {
+                    self.selected_issue_id = Some(issue.id.clone());
+                    self.comment_input.clear();
+                    self.comment_cursor_position = 0;
+                    self.mode = AppMode::Comment;
+                }
+            }
+            KeyCode::Char('l') => {
+                // Quick edit labels - go directly to label selection
+                if let Some(issue) = self.get_selected_issue() {
+                    let issue_id = issue.id.clone();
+                    let current_label_ids: Vec<String> = issue.labels.nodes.iter()
+                        .map(|label| label.id.clone())
+                        .collect();
+                    
+                    self.selected_issue_id = Some(issue_id);
+                    self.edit_field = EditField::Labels;
+                    self.option_index = 0;
+                    self.selected_option = None;
+                    self.selected_labels = current_label_ids;
+                    self.mode = AppMode::SelectOption;
+                }
             }
             _ => {}
         }
@@ -340,6 +408,8 @@ impl InteractiveApp {
             GroupBy::Status => GroupBy::Project,
             GroupBy::Project => GroupBy::Status,
         };
+        // Re-apply filters to trigger re-sorting
+        self.apply_filters();
     }
 
     pub fn get_selected_issue(&self) -> Option<&Issue> {
@@ -399,7 +469,7 @@ impl InteractiveApp {
                 }
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                if self.edit_field_index < 4 { // We have 5 fields (0-4)
+                if self.edit_field_index < 5 { // We have 6 fields (0-5)
                     self.edit_field_index += 1;
                 }
             }
@@ -410,15 +480,28 @@ impl InteractiveApp {
                     2 => EditField::Status,
                     3 => EditField::Assignee,
                     4 => EditField::Priority,
+                    5 => EditField::Labels,
                     _ => EditField::Title,
                 };
                 self.edit_input.clear();
                 
-                // For status and priority, show selection mode
+                // For status, priority, and labels, show selection mode
                 match self.edit_field {
-                    EditField::Status | EditField::Priority => {
+                    EditField::Status | EditField::Priority | EditField::Labels => {
                         self.option_index = 0;
                         self.selected_option = None;
+                        
+                        // For labels, populate selected_labels with current issue's labels
+                        if self.edit_field == EditField::Labels {
+                            if let Some(issue) = self.get_selected_issue() {
+                                self.selected_labels = issue.labels.nodes.iter()
+                                    .map(|label| label.id.clone())
+                                    .collect();
+                            } else {
+                                self.selected_labels.clear();
+                            }
+                        }
+                        
                         self.mode = AppMode::SelectOption;
                     }
                     _ => {
@@ -515,13 +598,14 @@ impl InteractiveApp {
                 let max_index = match self.edit_field {
                     EditField::Status => self.workflow_states.len().saturating_sub(1),
                     EditField::Priority => 4, // 0-4 for None, Low, Medium, High, Urgent
+                    EditField::Labels => self.available_labels.len().saturating_sub(1),
                     _ => 0,
                 };
                 if self.option_index < max_index {
                     self.option_index += 1;
                 }
             }
-            KeyCode::Enter => {
+            KeyCode::Enter | KeyCode::Char(' ') => {
                 match self.edit_field {
                     EditField::Status => {
                         if let Some(state) = self.workflow_states.get(self.option_index) {
@@ -530,6 +614,21 @@ impl InteractiveApp {
                     }
                     EditField::Priority => {
                         self.selected_option = Some(self.option_index.to_string());
+                    }
+                    EditField::Labels => {
+                        // Toggle label selection with space bar
+                        if let Some(label) = self.available_labels.get(self.option_index) {
+                            let label_id = label.id.clone();
+                            if let Some(pos) = self.selected_labels.iter().position(|id| id == &label_id) {
+                                self.selected_labels.remove(pos);
+                            } else {
+                                self.selected_labels.push(label_id);
+                            }
+                            // Don't close menu on space, only on Enter
+                            if key == KeyCode::Char(' ') {
+                                return;
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -631,6 +730,12 @@ impl InteractiveApp {
                     self.error_message = Some("Assignee field is not yet editable".to_string());
                     return Ok(());
                 }
+                EditField::Labels => {
+                    let label_ids: Vec<&str> = self.selected_labels.iter()
+                        .map(|s| s.as_str())
+                        .collect();
+                    self.client.update_issue(issue_id, None, None, None, None, None, Some(label_ids)).await
+                }
             };
             
             match result {
@@ -638,6 +743,7 @@ impl InteractiveApp {
                     self.loading = false;
                     self.edit_input.clear();
                     self.selected_option = None;
+                    self.selected_labels.clear();
                     self.mode = AppMode::Detail;
                     // Refresh issues to show the update
                     let _ = self.refresh_issues().await;
