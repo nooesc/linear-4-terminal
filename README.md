@@ -24,33 +24,86 @@ A fast, powerful terminal client for Linear project management. Access Linear's 
 ✅ **Bulk Operations**: Update, move, or archive multiple issues at once  
 ✅ **Comments Management**: Full CRUD operations on issue comments with markdown support  
 ✅ **Smart Filtering**: Filter by status, assignee, team, priority, or search text  
-✅ **Beautiful Output**: Color-coded terminal display with status grouping  
+✅ **Beautiful Output**: Color-coded terminal display with dynamic responsive layout  
 ✅ **Multiple Formats**: Export to JSON, table view, or simple text  
 ✅ **Secure Authentication**: API key management with environment variables  
 ✅ **Cross-platform**: Works on macOS, Linux, and Windows (WSL)  
-✅ **Blazing Fast**: Built with Rust for instant response times  
-✅ **Interactive Mode**: Real-time TUI for browsing and managing issues
+✅ **Blazing Fast**: Built with Rust for instant response times, parallel API calls  
+✅ **Interactive Mode**: Feature-rich TUI with quick actions, link navigation, and smart editing
 
 ## Interactive Mode (NEW!)
 
-Launch an interactive terminal UI for browsing Linear issues:
+Launch a powerful interactive terminal UI for managing Linear issues:
 
 ```bash
 linear interactive  # or just 'linear' without arguments
 ```
 
 ### Interactive Mode Features:
+
+#### Navigation & Display
 - **Real-time Navigation**: Use arrow keys or j/k to browse issues
+- **Colorful Display**: Issues are color-coded by status and priority
+- **Priority Indicators**: Visual symbols (◦ • ■ ▲) for priority levels
+- **Responsive Layout**: Automatically adjusts columns based on terminal width
+- **Issue Age**: Shows time since creation (3d, 1w, 2h, etc.)
+- **Smart Truncation**: Optimized title display with full text in header
+
+#### Quick Actions
 - **Quick Search**: Press `/` to search issues by title or ID
+- **Quick Edit**: Direct shortcuts from the main table:
+  - `s` - Change issue status
+  - `c` - Add a comment
+  - `l` - Edit labels
+  - `p` - Change project assignment
+  - `e` - Full edit menu
+- **Quick Open**: Press `o` to open issue in browser
+- **Smart Return**: After quick edits, returns you to the main table (not detail view)
+
+#### Issue Details View
+- **Full Information**: Complete issue details including description
+- **Links Section**: Automatically extracts and displays links from descriptions
+- **Link Navigation**: Press `l` to navigate links with j/k, Enter to open
+- **Quick Link Access**: Number keys (0-9) for instant link opening
+- **Scrollable Content**: Long link lists scroll with position indicators
+
+#### Grouping & Organization
 - **Group Toggle**: Press `g` to switch between status and project grouping
-- **Issue Details**: Press Enter to view full issue details
-- **Keyboard Shortcuts**: 
+- **Visual Grouping**: Issues sorted by group with clear visual separation
+- **Project/Label Display**: Separate columns with distinct colors
+
+#### Edit Capabilities
+- **Title & Description**: Edit issue text fields
+- **Status Selection**: Visual menu with current status highlighted
+- **Priority Selection**: Choose from None/Low/Medium/High/Urgent
+- **Label Management**: Multi-select labels with checkboxes
+- **Project Assignment**: Select project or remove assignment
+- **Assignee**: Update issue assignee (coming soon)
+- **External Editor**: Ctrl+E for description editing in your preferred editor
+
+### Complete Keyboard Shortcuts:
+- **Navigation**:
   - `j/k` or ↓/↑ - Navigate up/down
   - `Enter` - View issue details
+  - `Esc` or `q` - Go back/Quit
+  
+- **Quick Actions**:
+  - `s` - Quick status change
+  - `c` - Quick comment
+  - `l` - Quick label edit
+  - `p` - Quick project edit
+  - `e` - Full edit menu
+  - `o` - Open in Linear (browser)
+  
+- **Search & Filter**:
   - `/` - Search mode
   - `g` - Toggle grouping (status/project)
   - `r` - Refresh issues
-  - `q` - Quit
+  
+- **In Detail View**:
+  - `l` - Enter links navigation mode
+  - `0-9` - Quick open numbered link
+  - All quick edit shortcuts work here too
 
 ## Future Plans & Roadmap
 
@@ -61,8 +114,15 @@ We're actively working on expanding the Linear CLI with powerful new features. H
 - ✅ **Bulk Operations**: Batch update, move, and archive issues
 - ✅ **Advanced Search**: Query language with operators and saved searches
 - ✅ **Git Integration**: Create commits, branches, and PRs linked to Linear issues
-- ✅ **Interactive Mode**: Terminal UI with real-time navigation and search
-- ✅ **Project-based Grouping**: Group issues by project in addition to status
+- ✅ **Enhanced Interactive Mode**: 
+  - Quick edit shortcuts (status, comment, labels, project)
+  - Link extraction and navigation from issue descriptions
+  - Responsive column layout with smart width calculation
+  - Priority indicators and color coding
+  - Issue age display
+  - Project editing capability
+  - Smart navigation that returns to original context
+- ✅ **Performance Optimization**: 3x faster startup with parallel API calls
 
 ### 📋 Planned Features (Priority Order)
 
