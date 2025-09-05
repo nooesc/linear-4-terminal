@@ -1,7 +1,7 @@
 use clap::ArgMatches;
 use colored::*;
-use crate::client::LinearClient;
-use crate::config::get_api_key;
+use crate::cli_context::CliContext;
+use crate::error::{LinearError, LinearResult, ErrorContext};
 
 fn parse_issue_ids(matches: &ArgMatches) -> Vec<String> {
     let mut ids = Vec::new();
@@ -22,12 +22,16 @@ fn parse_issue_ids(matches: &ArgMatches) -> Vec<String> {
 }
 
 pub async fn handle_bulk_update(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
-    let api_key = get_api_key()?;
-    let client = LinearClient::new(api_key);
+    handle_bulk_update_impl(matches).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+}
+
+async fn handle_bulk_update_impl(matches: &ArgMatches) -> LinearResult<()> {
+    let mut context = CliContext::load().context("Failed to load CLI context")?;
+    let client = context.verified_client().context("Failed to get Linear client")?;
     
     let issue_ids = parse_issue_ids(matches);
     if issue_ids.is_empty() {
-        return Err("No issue IDs provided".into());
+        return Err(LinearError::InvalidInput("No issue IDs provided".to_string()));
     }
     
     let state_id = matches.get_one::<String>("state");
@@ -40,7 +44,7 @@ pub async fn handle_bulk_update(matches: &ArgMatches) -> Result<(), Box<dyn std:
         .map(|l| l.split(',').map(|s| s.trim().to_string()).collect::<Vec<_>>());
     
     if state_id.is_none() && assignee_id.is_none() && priority.is_none() && labels.is_none() && remove_labels.is_none() {
-        return Err("No update parameters provided. Use --state, --assignee, --priority, --labels, or --remove-labels".into());
+        return Err(LinearError::InvalidInput("No update parameters provided. Use --state, --assignee, --priority, --labels, or --remove-labels".to_string()));
     }
     
     println!("Updating {} issues...", issue_ids.len());
@@ -78,19 +82,23 @@ pub async fn handle_bulk_update(matches: &ArgMatches) -> Result<(), Box<dyn std:
 }
 
 pub async fn handle_bulk_move(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
-    let api_key = get_api_key()?;
-    let client = LinearClient::new(api_key);
+    handle_bulk_move_impl(matches).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+}
+
+async fn handle_bulk_move_impl(matches: &ArgMatches) -> LinearResult<()> {
+    let mut context = CliContext::load().context("Failed to load CLI context")?;
+    let client = context.verified_client().context("Failed to get Linear client")?;
     
     let issue_ids = parse_issue_ids(matches);
     if issue_ids.is_empty() {
-        return Err("No issue IDs provided".into());
+        return Err(LinearError::InvalidInput("No issue IDs provided".to_string()));
     }
     
     let team_id = matches.get_one::<String>("team");
     let project_id = matches.get_one::<String>("project");
     
     if team_id.is_none() && project_id.is_none() {
-        return Err("No move parameters provided. Use --team or --project".into());
+        return Err(LinearError::InvalidInput("No move parameters provided. Use --team or --project".to_string()));
     }
     
     println!("Moving {} issues...", issue_ids.len());
@@ -125,12 +133,16 @@ pub async fn handle_bulk_move(matches: &ArgMatches) -> Result<(), Box<dyn std::e
 }
 
 pub async fn handle_bulk_archive(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
-    let api_key = get_api_key()?;
-    let client = LinearClient::new(api_key);
+    handle_bulk_archive_impl(matches).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+}
+
+async fn handle_bulk_archive_impl(matches: &ArgMatches) -> LinearResult<()> {
+    let mut context = CliContext::load().context("Failed to load CLI context")?;
+    let client = context.verified_client().context("Failed to get Linear client")?;
     
     let issue_ids = parse_issue_ids(matches);
     if issue_ids.is_empty() {
-        return Err("No issue IDs provided".into());
+        return Err(LinearError::InvalidInput("No issue IDs provided".to_string()));
     }
     
     println!("Archiving {} issues...", issue_ids.len());

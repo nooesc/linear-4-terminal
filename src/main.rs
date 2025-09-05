@@ -5,15 +5,36 @@ mod client;
 mod commands;
 mod config;
 mod constants;
+mod error;
+mod cli_context;
 mod filtering;
 mod formatting;
 mod models;
 mod interactive;
+mod graphql_fields;
+mod logging;
 
 use commands::*;
 
 #[tokio::main]
 async fn main() {
+    // Initialize logging
+    if let Err(e) = logging::init_logging() {
+        eprintln!("Failed to initialize logging: {}", e);
+    }
+    
+    // Set up panic handler
+    std::panic::set_hook(Box::new(|panic_info| {
+        logging::log_panic_info(panic_info);
+        
+        // Save log file path to a temporary file for later retrieval
+        if let Some(log_file) = logging::get_log_file_path() {
+            let _ = std::fs::write("/tmp/linear-cli-last-log.txt", log_file.to_string_lossy().as_bytes());
+        }
+    }));
+    
+    logging::log_info("Linear CLI starting");
+    
     let app = Command::new("linear")
         .about("Linear CLI - Interact with Linear's API from the command line")
         .version("1.0.0")

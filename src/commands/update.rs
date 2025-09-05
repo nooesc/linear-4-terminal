@@ -1,14 +1,18 @@
 use clap::ArgMatches;
 use colored::*;
-use crate::client::LinearClient;
-use crate::config::get_api_key;
+use crate::cli_context::CliContext;
+use crate::error::{LinearError, LinearResult, ErrorContext};
 
 pub async fn handle_update_issue(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
-    let api_key = get_api_key()?;
-    let client = LinearClient::new(api_key);
+    handle_update_issue_impl(matches).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+}
+
+async fn handle_update_issue_impl(matches: &ArgMatches) -> LinearResult<()> {
+    let mut context = CliContext::load().context("Failed to load CLI context")?;
+    let client = context.verified_client().context("Failed to get Linear client")?;
 
     let issue_id = matches.get_one::<String>("id")
-        .ok_or("Issue ID is required")?;
+        .ok_or_else(|| LinearError::InvalidInput("Issue ID is required".to_string()))?;
     
     let title = matches.get_one::<String>("title");
     let description = matches.get_one::<String>("description");
@@ -29,7 +33,7 @@ pub async fn handle_update_issue(matches: &ArgMatches) -> Result<(), Box<dyn std
     // Check if at least one field is being updated
     if title.is_none() && description.is_none() && state_id.is_none() && 
        priority.is_none() && assignee_id.is_none() && label_ids.is_none() {
-        return Err("No fields to update. Provide at least one field to update.".into());
+        return Err(LinearError::InvalidInput("No fields to update. Provide at least one field to update.".to_string()));
     }
 
     let issue = client.update_issue(
@@ -40,7 +44,9 @@ pub async fn handle_update_issue(matches: &ArgMatches) -> Result<(), Box<dyn std
         priority,
         assignee_id.map(|s| s.as_str()),
         label_ids,
-    ).await?;
+    ).await
+        .map_err(|e| LinearError::ApiError(format!("Failed to update issue: {}", e)))
+        .context("Updating issue")?;
 
     println!("{} {}", "✅".green(), "Issue updated successfully!".green().bold());
     println!("{}: {}", "ID".bold(), issue.identifier.bright_blue().bold());
@@ -52,11 +58,15 @@ pub async fn handle_update_issue(matches: &ArgMatches) -> Result<(), Box<dyn std
 }
 
 pub async fn handle_update_project(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
-    let api_key = get_api_key()?;
-    let client = LinearClient::new(api_key);
+    handle_update_project_impl(matches).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+}
+
+async fn handle_update_project_impl(matches: &ArgMatches) -> LinearResult<()> {
+    let mut context = CliContext::load().context("Failed to load CLI context")?;
+    let client = context.verified_client().context("Failed to get Linear client")?;
 
     let project_id = matches.get_one::<String>("id")
-        .ok_or("Project ID is required")?;
+        .ok_or_else(|| LinearError::InvalidInput("Project ID is required".to_string()))?;
     
     let name = matches.get_one::<String>("name");
     let description = matches.get_one::<String>("description");
@@ -64,7 +74,7 @@ pub async fn handle_update_project(matches: &ArgMatches) -> Result<(), Box<dyn s
 
     // Check if at least one field is being updated
     if name.is_none() && description.is_none() && state.is_none() {
-        return Err("No fields to update. Provide at least one field to update.".into());
+        return Err(LinearError::InvalidInput("No fields to update. Provide at least one field to update.".to_string()));
     }
 
     let project = client.update_project(
@@ -72,7 +82,9 @@ pub async fn handle_update_project(matches: &ArgMatches) -> Result<(), Box<dyn s
         name.map(|s| s.as_str()),
         description.map(|s| s.as_str()),
         state.map(|s| s.as_str()),
-    ).await?;
+    ).await
+        .map_err(|e| LinearError::ApiError(format!("Failed to update project: {}", e)))
+        .context("Updating project")?;
 
     println!("✅ Project updated successfully!");
     println!("ID: {}", project.id);

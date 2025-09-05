@@ -1,13 +1,16 @@
 use clap::ArgMatches;
 use serde_json::json;
-use crate::client::LinearClient;
-use crate::config::get_api_key;
-use crate::filtering::{parse_filter_query, build_graphql_filter};
+use crate::cli_context::CliContext;
+use crate::error::{LinearError, ErrorContext};
+use crate::filtering::FilterAdapter;
 use crate::formatting::issues::{print_issues, print_single_issue};
 
 pub async fn handle_issues(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
-    let api_key = get_api_key()?;
-    let client = LinearClient::new(api_key);
+    // Create CLI context and get verified client
+    let mut context = CliContext::load()
+        .context("Failed to load CLI context")?;
+    let client = context.verified_client()
+        .context("Failed to get Linear client")?;
     
     let format = matches.get_one::<String>("format").map(|s| s.as_str()).unwrap_or("simple");
     let group_by = matches.get_one::<String>("group-by").map(|s| s.as_str()).unwrap_or("status");
@@ -19,17 +22,10 @@ pub async fn handle_issues(matches: &ArgMatches) -> Result<(), Box<dyn std::erro
     
     // Check if advanced filter is provided
     if let Some(filter_query) = matches.get_one::<String>("filter") {
-        // Parse and apply advanced filter
-        match parse_filter_query(filter_query) {
-            Ok(filters) => {
-                filter = build_graphql_filter(filters);
-            }
-            Err(e) => {
-                eprintln!("Error parsing filter: {}", e);
-                eprintln!("Use --help to see filter syntax examples");
-                return Err(e.into());
-            }
-        }
+        // Try new filter system first, fall back to legacy if needed
+        filter = FilterAdapter::parse_and_build(filter_query)
+            .map_err(|e| LinearError::InvalidInput(format!("Failed to parse filter: {}", e)))
+            .with_context(|| format!("Filter query: {}", filter_query))?;
     } else {
         // Handle legacy filters for backward compatibility
         // Handle state filters
@@ -45,7 +41,9 @@ pub async fn handle_issues(matches: &ArgMatches) -> Result<(), Box<dyn std::erro
 
         // Handle assignee filters
         if matches.get_flag("mine") {
-            let viewer = client.get_viewer().await?;
+            let viewer = client.get_viewer().await
+                .map_err(|e| LinearError::ApiError(format!("Failed to get current user: {}", e)))
+                .context("Getting viewer information for --mine filter")?;
             filter["assignee"] = json!({"id": {"eq": viewer.id}});
         } else if let Some(assignee) = matches.get_one::<String>("assignee") {
             filter["assignee"] = json!({"email": {"eq": assignee}});
@@ -68,7 +66,9 @@ pub async fn handle_issues(matches: &ArgMatches) -> Result<(), Box<dyn std::erro
         Some(filter)
     };
 
-    let issues = client.get_issues(filter_param, Some(limit)).await?;
+    let issues = client.get_issues(filter_param, Some(limit)).await
+        .map_err(|e| LinearError::ApiError(format!("Failed to fetch issues: {}", e)))
+        .context("Fetching issues from Linear API")?;
     
     if issues.is_empty() {
         println!("No issues found matching your criteria.");
@@ -81,13 +81,18 @@ pub async fn handle_issues(matches: &ArgMatches) -> Result<(), Box<dyn std::erro
 }
 
 pub async fn handle_issue(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
-    let api_key = get_api_key()?;
-    let client = LinearClient::new(api_key);
+    // Create CLI context and get verified client
+    let mut context = CliContext::load()
+        .context("Failed to load CLI context")?;
+    let client = context.verified_client()
+        .context("Failed to get Linear client")?;
     
     let identifier = matches.get_one::<String>("identifier")
-        .ok_or("Issue identifier is required")?;
+        .ok_or_else(|| LinearError::InvalidInput("Issue identifier is required".to_string()))?;
     
-    let issue = client.get_issue_by_identifier(identifier).await?;
+    let issue = client.get_issue_by_identifier(identifier).await
+        .map_err(|e| LinearError::ApiError(format!("Failed to fetch issue: {}", e)))
+        .with_context(|| format!("Fetching issue with identifier: {}", identifier))?;
     print_single_issue(&issue);
     
     Ok(())

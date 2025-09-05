@@ -60,24 +60,35 @@ pub fn parse_filter_query(query: &str) -> Result<Vec<FilterQuery>, String> {
         });
     }
     
-    // Parse field:operator:value patterns
-    let re = Regex::new(r"(\w+):(!=|>=|<=|>|<|~|in:|)([^AND\s]+)").unwrap();
+    // Enhanced regex pattern to support quoted values and more operators
+    let re = Regex::new(r#"(\w+):(!=|>=|<=|>|<|~=|~|\^=|\$=|in:|)(?:"([^"]+)"|([^AND\s]+))"#).unwrap();
     
     for cap in re.captures_iter(query) {
         let field = cap[1].to_string();
         let op_str = &cap[2];
-        let value = cap[3].to_string();
+        // Handle quoted and unquoted values
+        let value = cap.get(3)
+            .or_else(|| cap.get(4))
+            .map(|m| m.as_str().to_string())
+            .unwrap_or_default();
         
         // Skip special fields we already handled
-        if field == "has" || field == "no" || field == "label" {
+        if field == "has" || field == "no" {
+            continue;
+        }
+        
+        // Skip label field if it's already handled by special cases
+        if field == "label" && (op_str.is_empty() || op_str == ":") {
             continue;
         }
         
         let operator = match op_str {
             "!=" => FilterOperator::NotEquals,
-            ">" | ">=" => FilterOperator::GreaterThan,
-            "<" | "<=" => FilterOperator::LessThan,
-            "~" => FilterOperator::Contains,
+            ">=" => FilterOperator::GreaterThan,
+            ">" => FilterOperator::GreaterThan,
+            "<=" => FilterOperator::LessThan,
+            "<" => FilterOperator::LessThan,
+            "~" | "~=" => FilterOperator::Contains,
             "in:" => FilterOperator::In,
             _ => FilterOperator::Equals,
         };
@@ -90,7 +101,7 @@ pub fn parse_filter_query(query: &str) -> Result<Vec<FilterQuery>, String> {
     }
     
     if filters.is_empty() {
-        return Err("No valid filters found in query".to_string());
+        return Err("No valid filters found in query. Use format: field:operator:value (e.g., status:!=:completed)".to_string());
     }
     
     Ok(filters)
@@ -174,8 +185,27 @@ pub fn build_graphql_filter(filters: Vec<FilterQuery>) -> Value {
 pub fn parse_relative_date(input: &str) -> Option<String> {
     use chrono::{Duration, Utc};
     
-    let re = Regex::new(r"(\d+)(day|week|month|hour)s?").unwrap();
+    // Enhanced regex to support abbreviated forms (7d, 2w, 1m, 24h)
+    let re = Regex::new(r"^(\d+)([hdwmHDWM])(ay|ays|eek|eeks|onth|onths|our|ours)?$").unwrap();
     if let Some(captures) = re.captures(input) {
+        let amount = captures[1].parse::<i64>().ok()?;
+        let unit = captures[2].to_lowercase();
+        
+        let duration = match unit.as_str() {
+            "h" => Duration::hours(amount),
+            "d" => Duration::days(amount),
+            "w" => Duration::weeks(amount),
+            "m" => Duration::days(amount * 30), // Approximation
+            _ => return None,
+        };
+        
+        let date = Utc::now() - duration;
+        return Some(date.to_rfc3339());
+    }
+    
+    // Also try the full word format
+    let re_full = Regex::new(r"(\d+)\s*(day|week|month|hour)s?").unwrap();
+    if let Some(captures) = re_full.captures(input) {
         let amount = captures[1].parse::<i64>().ok()?;
         let unit = &captures[2];
         

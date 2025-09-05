@@ -3,15 +3,19 @@ use clap::ArgMatches;
 use colored::*;
 use regex::Regex;
 use std::process::Command;
-use crate::client::LinearClient;
-use crate::config::get_api_key;
+use crate::cli_context::CliContext;
+use crate::error::{LinearError, LinearResult, ErrorContext};
 
 // Common Linear issue ID patterns
 const ISSUE_PATTERN: &str = r"([A-Z]{2,}-\d+)";
 
 pub async fn handle_git_commit(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    handle_git_commit_impl(matches).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+}
+
+async fn handle_git_commit_impl(matches: &ArgMatches) -> LinearResult<()> {
     let message = matches.get_one::<String>("message")
-        .ok_or("Commit message is required")?;
+        .ok_or_else(|| LinearError::InvalidInput("Commit message is required".to_string()))?;
     let issue_id = matches.get_one::<String>("issue");
     let push = matches.get_flag("push");
     
@@ -35,7 +39,7 @@ pub async fn handle_git_commit(matches: &ArgMatches) -> Result<(), Box<dyn std::
         .output()?;
     
     if !output.status.success() {
-        return Err(format!("Git commit failed: {}", String::from_utf8_lossy(&output.stderr)).into());
+        return Err(LinearError::Unknown(format!("Git commit failed: {}", String::from_utf8_lossy(&output.stderr))));
     }
     
     println!("✅ Commit created successfully!");
@@ -44,8 +48,8 @@ pub async fn handle_git_commit(matches: &ArgMatches) -> Result<(), Box<dyn std::
     // Update Linear issue status if requested
     if matches.get_flag("update-status") {
         if let Some(new_state) = matches.get_one::<String>("status") {
-            let api_key = get_api_key()?;
-            let client = LinearClient::new(api_key);
+            let mut context = CliContext::load().context("Failed to load CLI context")?;
+            let client = context.verified_client().context("Failed to get Linear client")?;
             
             for issue_id in &issue_ids {
                 match client.update_issue(
@@ -74,7 +78,7 @@ pub async fn handle_git_commit(matches: &ArgMatches) -> Result<(), Box<dyn std::
         if push_output.status.success() {
             println!("✅ Pushed successfully!");
         } else {
-            return Err(format!("Git push failed: {}", String::from_utf8_lossy(&push_output.stderr)).into());
+            return Err(LinearError::Unknown(format!("Git push failed: {}", String::from_utf8_lossy(&push_output.stderr))));
         }
     }
     
@@ -82,16 +86,22 @@ pub async fn handle_git_commit(matches: &ArgMatches) -> Result<(), Box<dyn std::
 }
 
 pub async fn handle_git_branch(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    handle_git_branch_impl(matches).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+}
+
+async fn handle_git_branch_impl(matches: &ArgMatches) -> LinearResult<()> {
     let issue_id = matches.get_one::<String>("issue")
-        .ok_or("Issue ID is required")?;
+        .ok_or_else(|| LinearError::InvalidInput("Issue ID is required".to_string()))?;
     let prefix = matches.get_one::<String>("prefix")
         .map(|s| s.as_str())
         .unwrap_or("feature");
     
     // Get issue details from Linear
-    let api_key = get_api_key()?;
-    let client = LinearClient::new(api_key);
-    let issue = client.get_issue_by_identifier(issue_id).await?;
+    let mut context = CliContext::load().context("Failed to load CLI context")?;
+    let client = context.verified_client().context("Failed to get Linear client")?;
+    let issue = client.get_issue_by_identifier(issue_id).await
+        .map_err(|e| LinearError::ApiError(format!("Failed to get issue: {}", e)))
+        .context("Getting issue details")?;
     
     // Create branch name from issue title
     let sanitized_title = sanitize_branch_name(&issue.title);
@@ -109,8 +119,8 @@ pub async fn handle_git_branch(matches: &ArgMatches) -> Result<(), Box<dyn std::
             .output()?;
         
         if !checkout_output.status.success() {
-            return Err(format!("Failed to create/checkout branch: {}", 
-                String::from_utf8_lossy(&output.stderr)).into());
+            return Err(LinearError::Unknown(format!("Failed to create/checkout branch: {}", 
+                String::from_utf8_lossy(&output.stderr))));
         }
         println!("Switched to existing branch: {}", branch_name);
     } else {
@@ -124,6 +134,10 @@ pub async fn handle_git_branch(matches: &ArgMatches) -> Result<(), Box<dyn std::
 }
 
 pub async fn handle_git_pr(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    handle_git_pr_impl(matches).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+}
+
+async fn handle_git_pr_impl(matches: &ArgMatches) -> LinearResult<()> {
     let title = matches.get_one::<String>("title");
     let body = matches.get_one::<String>("body");
     let draft = matches.get_flag("draft");
@@ -135,7 +149,7 @@ pub async fn handle_git_pr(matches: &ArgMatches) -> Result<(), Box<dyn std::erro
         .output()?;
     
     if !branch_output.status.success() {
-        return Err("Failed to get current branch".into());
+        return Err(LinearError::Unknown("Failed to get current branch".to_string()));
     }
     
     let current_branch = String::from_utf8_lossy(&branch_output.stdout).trim().to_string();
@@ -145,8 +159,8 @@ pub async fn handle_git_pr(matches: &ArgMatches) -> Result<(), Box<dyn std::erro
     
     // Get issue details if we found an ID
     let (pr_title, pr_body) = if !issue_ids.is_empty() {
-        let api_key = get_api_key()?;
-        let client = LinearClient::new(api_key);
+        let mut context = CliContext::load().context("Failed to load CLI context")?;
+        let client = context.verified_client().context("Failed to get Linear client")?;
         
         match client.get_issue_by_identifier(&issue_ids[0]).await {
             Ok(issue) => {
@@ -198,7 +212,7 @@ pub async fn handle_git_pr(matches: &ArgMatches) -> Result<(), Box<dyn std::erro
         .output()?;
     
     if !output.status.success() {
-        return Err(format!("Failed to create PR: {}", String::from_utf8_lossy(&output.stderr)).into());
+        return Err(LinearError::Unknown(format!("Failed to create PR: {}", String::from_utf8_lossy(&output.stderr))));
     }
     
     println!("✅ Pull request created successfully!");
@@ -208,10 +222,15 @@ pub async fn handle_git_pr(matches: &ArgMatches) -> Result<(), Box<dyn std::erro
 }
 
 pub async fn handle_git_hook(_matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    handle_git_hook_impl(_matches).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+}
+
+async fn handle_git_hook_impl(_matches: &ArgMatches) -> LinearResult<()> {
     // Read commit message from stdin (for commit-msg hook)
     use std::io::{self, Read};
     let mut buffer = String::new();
-    io::stdin().read_to_string(&mut buffer)?;
+    io::stdin().read_to_string(&mut buffer)
+        .context("Failed to read commit message from stdin")?;
     
     // Extract issue IDs
     let issue_ids = extract_issue_ids(&buffer);
@@ -224,8 +243,8 @@ pub async fn handle_git_hook(_matches: &ArgMatches) -> Result<(), Box<dyn std::e
     println!("Found Linear issues: {}", issue_ids.join(", "));
     
     // Update issue status based on keywords
-    let api_key = get_api_key()?;
-    let client = LinearClient::new(api_key);
+    let mut context = CliContext::load().context("Failed to load CLI context")?;
+    let client = context.verified_client().context("Failed to get Linear client")?;
     
     for issue_id in issue_ids {
         // Check for status keywords
@@ -262,12 +281,17 @@ pub async fn handle_git_hook(_matches: &ArgMatches) -> Result<(), Box<dyn std::e
 }
 
 pub async fn handle_install_hook(_matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    handle_install_hook_impl(_matches).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+}
+
+async fn handle_install_hook_impl(_matches: &ArgMatches) -> LinearResult<()> {
     let git_dir = Command::new("git")
         .args(&["rev-parse", "--git-dir"])
-        .output()?;
+        .output()
+        .context("Failed to execute git command")?;
 
     if !git_dir.status.success() {
-        return Err("Not a git repository".into());
+        return Err(LinearError::InvalidInput("Not a git repository".to_string()));
     }
 
     let git_dir_path = String::from_utf8_lossy(&git_dir.stdout).trim().to_string();
@@ -276,7 +300,8 @@ pub async fn handle_install_hook(_matches: &ArgMatches) -> Result<(), Box<dyn st
 
     // Create hooks directory if it doesn't exist
     if !hooks_path.exists() {
-        std::fs::create_dir_all(&hooks_path)?;
+        std::fs::create_dir_all(&hooks_path)
+            .context("Failed to create hooks directory")?;
     }
 
     let hook_script = r##"#!/bin/sh
@@ -298,8 +323,10 @@ fi
 echo "$COMMIT_MSG" | linear git hook
 "##;
 
-    std::fs::write(&commit_msg_hook_path, hook_script)?;
-    std::fs::set_permissions(&commit_msg_hook_path, std::fs::Permissions::from_mode(0o755))?;
+    std::fs::write(&commit_msg_hook_path, hook_script)
+        .context("Failed to write hook script")?;
+    std::fs::set_permissions(&commit_msg_hook_path, std::fs::Permissions::from_mode(0o755))
+        .context("Failed to set hook permissions")?;
 
     println!("✅ commit-msg hook installed successfully at: {:?}", commit_msg_hook_path);
     println!("You can now automatically update Linear issues by mentioning them in your commit messages.");

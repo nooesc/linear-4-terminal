@@ -231,6 +231,20 @@ impl LinearClient {
         assignee_id: Option<&str>,
         label_ids: Option<Vec<&str>>,
     ) -> Result<Issue, Box<dyn std::error::Error>> {
+        self.update_issue_with_project(issue_id, title, description, state_id, priority, assignee_id, label_ids, None).await
+    }
+    
+    pub async fn update_issue_with_project(
+        &self,
+        issue_id: &str,
+        title: Option<&str>,
+        description: Option<&str>,
+        state_id: Option<&str>,
+        priority: Option<u8>,
+        assignee_id: Option<&str>,
+        label_ids: Option<Vec<&str>>,
+        project_id: Option<Option<&str>>, // Some(None) means remove project
+    ) -> Result<Issue, Box<dyn std::error::Error>> {
         let query = format!(r#"
             mutation($id: String!, $input: IssueUpdateInput!) {{
                 issueUpdate(id: $id, input: $input) {{
@@ -259,6 +273,12 @@ impl LinearClient {
         }
         if let Some(labels) = label_ids {
             input["labelIds"] = json!(labels);
+        }
+        if let Some(project_opt) = project_id {
+            match project_opt {
+                Some(pid) => input["projectId"] = json!(pid),
+                None => input["projectId"] = json!(null),
+            }
         }
 
         let variables = json!({ 

@@ -1,27 +1,34 @@
 use clap::ArgMatches;
 use colored::*;
-use crate::client::LinearClient;
-use crate::config::{get_api_key, load_config};
+use crate::cli_context::CliContext;
+use crate::config::load_config;
+use crate::error::{LinearError, LinearResult, ErrorContext};
 
 pub async fn handle_create_issue(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
-    let api_key = get_api_key()?;
-    let client = LinearClient::new(api_key);
+    handle_create_issue_impl(matches).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+}
+
+async fn handle_create_issue_impl(matches: &ArgMatches) -> LinearResult<()> {
+    let mut context = CliContext::load().context("Failed to load CLI context")?;
+    let client = context.verified_client().context("Failed to get Linear client")?;
 
     let title = matches.get_one::<String>("title")
-        .ok_or("Title is required")?;
+        .ok_or_else(|| LinearError::InvalidInput("Title is required".to_string()))?;
     let description = matches.get_one::<String>("description");
     
     // Get team ID
     let team_id = if let Some(team_key) = matches.get_one::<String>("team") {
-        let teams = client.get_teams().await?;
+        let teams = client.get_teams().await
+            .map_err(|e| LinearError::ApiError(format!("Failed to get teams: {}", e)))
+            .context("Getting teams for team lookup")?;
         teams.iter()
             .find(|t| t.key == *team_key)
             .map(|t| t.id.clone())
-            .ok_or(format!("Team '{}' not found", team_key))?
+            .ok_or_else(|| LinearError::InvalidInput(format!("Team '{}' not found", team_key)))?
     } else {
         let config = load_config();
         config.default_team_id
-            .ok_or("No team specified and no default team configured")?
+            .ok_or_else(|| LinearError::InvalidInput("No team specified and no default team configured".to_string()))?
     };
 
     let priority = matches.get_one::<String>("priority")
@@ -45,7 +52,9 @@ pub async fn handle_create_issue(matches: &ArgMatches) -> Result<(), Box<dyn std
         priority,
         assignee_id.map(|s| s.as_str()),
         label_ids,
-    ).await?;
+    ).await
+        .map_err(|e| LinearError::ApiError(format!("Failed to create issue: {}", e)))
+        .context("Creating issue")?;
 
     println!("{} {}", "✅".green(), "Issue created successfully!".green().bold());
     println!("{}: {}", "ID".bold(), issue.identifier.bright_blue().bold());
@@ -58,11 +67,15 @@ pub async fn handle_create_issue(matches: &ArgMatches) -> Result<(), Box<dyn std
 }
 
 pub async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
-    let api_key = get_api_key()?;
-    let client = LinearClient::new(api_key);
+    handle_create_project_impl(matches).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+}
+
+async fn handle_create_project_impl(matches: &ArgMatches) -> LinearResult<()> {
+    let mut context = CliContext::load().context("Failed to load CLI context")?;
+    let client = context.verified_client().context("Failed to get Linear client")?;
 
     let name = matches.get_one::<String>("name")
-        .ok_or("Project name is required")?;
+        .ok_or_else(|| LinearError::InvalidInput("Project name is required".to_string()))?;
     let description = matches.get_one::<String>("description");
     
     let mut team_ids: Vec<String> = matches.get_many::<String>("teams")
@@ -71,9 +84,11 @@ pub async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn s
 
     // If no teams specified, get the first available team
     if team_ids.is_empty() {
-        let teams = client.get_teams().await?;
+        let teams = client.get_teams().await
+            .map_err(|e| LinearError::ApiError(format!("Failed to get teams: {}", e)))
+            .context("Getting teams list")?;
         if teams.is_empty() {
-            return Err("No teams found. Projects require at least one team.".into());
+            return Err(LinearError::InvalidInput("No teams found. Projects require at least one team.".to_string()));
         }
         eprintln!("No team specified. Using default team: {} ({})", teams[0].name, teams[0].key);
         team_ids.push(teams[0].id.clone());
@@ -97,7 +112,7 @@ pub async fn handle_create_project(matches: &ArgMatches) -> Result<(), Box<dyn s
             eprintln!("Failed to create project: {}", e);
             eprintln!("\nTip: Projects require at least one team. Use --teams flag with team ID.");
             eprintln!("Run 'linear teams' to see available teams.");
-            Err(e)
+            Err(LinearError::ApiError(format!("Failed to create project: {}", e)))
         }
     }
 }

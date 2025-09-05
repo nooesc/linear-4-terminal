@@ -6,6 +6,7 @@ use ratatui::{
     Frame,
 };
 use crate::models::Issue;
+use crate::logging::{log_debug, log_error};
 use super::app::{AppMode, EditField, GroupBy, InteractiveApp};
 use chrono::{DateTime, Utc};
 
@@ -33,12 +34,10 @@ fn calculate_column_widths(available_width: u16) -> ColumnWidths {
     
     // Minimum widths
     const MIN_ID: usize = 7;
-    const MIN_PRIORITY: usize = 2;
     const MIN_TITLE: usize = 10;  // Further reduced
     const MIN_PROJECT: usize = 8;
     const MIN_LABELS: usize = 10;
     const MIN_STATUS: usize = 8;
-    const MIN_ASSIGNEE: usize = 10;
     const MIN_LINKS: usize = 3;
     const MIN_AGE: usize = 5;
     
@@ -223,6 +222,7 @@ pub fn draw(frame: &mut Frame, app: &InteractiveApp) {
         }
         _ => {}
     }
+    
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
@@ -266,12 +266,14 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
         .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)));
     frame.render_widget(header, header_chunks[0]);
 
-    let info = format!(" Issues: {} | Group by: {} ", 
+    let done_text = if app.hide_done_issues { " | Done: Hidden" } else { "" };
+    let info = format!(" Issues: {} | Group by: {}{} ", 
         app.filtered_issues.len(),
         match app.group_by {
             GroupBy::Status => "Status",
             GroupBy::Project => "Project",
-        }
+        },
+        done_text
     );
     let info_widget = Paragraph::new(info)
         .style(Style::default().bg(Color::Black).fg(Color::Yellow))
@@ -608,7 +610,8 @@ fn draw_issue_detail(frame: &mut Frame, area: Rect, issue: &Issue, app: &Interac
 
     // Description
     let description = issue.description.as_deref().unwrap_or("No description");
-    let desc_widget = Paragraph::new(description)
+    let desc_lines = render_markdown_to_lines(description);
+    let desc_widget = Paragraph::new(desc_lines)
         .style(Style::default())
         .block(Block::default().borders(Borders::ALL).title(" Description "))
         .wrap(Wrap { trim: true });
@@ -708,7 +711,7 @@ fn draw_issue_detail(frame: &mut Frame, area: Rect, issue: &Issue, app: &Interac
 fn draw_footer(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
     let help_text = match app.mode {
         AppMode::Normal => {
-            "[q/Esc] Quit  [j/k] Nav  [Enter] View  [e] Edit  [s] Status  [c] Comment  [l] Labels  [o] Open  [/] Search  [g] Group"
+            "[q/Esc] Quit  [j/k] Nav  [Enter] View  [e] Edit  [s] Status  [c] Comment  [l] Labels  [p] Project  [d] Toggle Done  [o] Open  [/] Search  [g] Group"
         }
         AppMode::Search => {
             "[Esc] Cancel  [Enter] Apply  Type to search..."
@@ -909,6 +912,7 @@ fn draw_edit_menu_overlay(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
         ("Assignee", 3),
         ("Priority", 4),
         ("Labels", 5),
+        ("Project", 6),
     ];
     
     let mut lines = vec![ratatui::text::Line::from("")];
@@ -922,7 +926,7 @@ fn draw_edit_menu_overlay(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
         
         let prefix = if index == app.edit_field_index { " › " } else { "   " };
         let suffix = match (name, index) {
-            ("Status", _) | ("Priority", _) | ("Assignee", _) => " [select]",
+            ("Status", _) | ("Priority", _) | ("Assignee", _) | ("Project", _) => " [select]",
             ("Description", _) => " [Enter or E for editor]",
             _ => "",
         };
@@ -964,6 +968,7 @@ fn draw_edit_field_overlay(frame: &mut Frame, area: Rect, app: &InteractiveApp) 
         EditField::Assignee => "Assignee",
         EditField::Priority => "Priority",
         EditField::Labels => "Labels",
+        EditField::Project => "Project",
     };
     
     let edit_block = Block::default()
@@ -1025,10 +1030,30 @@ fn draw_edit_field_overlay(frame: &mut Frame, area: Rect, app: &InteractiveApp) 
 }
 
 fn draw_select_option_overlay(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
+    // If loading, show a loading message
+    if app.loading {
+        let loading_area = centered_rect(40, 5, area);
+        frame.render_widget(Clear, loading_area);
+        let loading_block = Block::default()
+            .borders(Borders::ALL)
+            .title(" Updating... ")
+            .border_style(Style::default().fg(Color::Yellow));
+        let loading_text = Paragraph::new("\nSaving changes...")
+            .block(loading_block)
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::Yellow));
+        frame.render_widget(loading_text, loading_area);
+        return;
+    }
     let height = match app.edit_field {
         EditField::Status => (app.workflow_states.len() + 4).min(20) as u16,
         EditField::Priority => 9,
         EditField::Labels => (app.available_labels.len() + 5).min(20) as u16,
+        EditField::Project => {
+            // +1 for "None" option, +1 for padding, +1 for "No projects" message if empty
+            let base_height = if app.available_projects.is_empty() { 4 } else { app.available_projects.len() + 2 };
+            base_height.min(20) as u16
+        }
         _ => 10,
     };
     
@@ -1055,6 +1080,7 @@ fn draw_select_option_overlay(frame: &mut Frame, area: Rect, app: &InteractiveAp
         EditField::Status => "Select Status",
         EditField::Priority => "Select Priority",
         EditField::Labels => "Select Labels (Space to toggle, Enter to save)",
+        EditField::Project => "Select Project",
         _ => "Select Option",
     };
     
@@ -1079,16 +1105,9 @@ fn draw_select_option_overlay(frame: &mut Frame, area: Rect, app: &InteractiveAp
                     .iter()
                     .enumerate()
                     .map(|(i, state)| {
-                        let current_marker = if let Some(issue) = app.get_selected_issue() {
-                            if issue.state.name == state.name { " (current)" } else { "" }
-                        } else {
-                            ""
-                        };
-                        let content = format!(" {}{} ", state.name, current_marker);
+                        let content = format!(" {} ", state.name);
                         let style = if i == app.option_index {
                             Style::default().fg(Color::Black).bg(Color::Magenta)
-                        } else if !current_marker.is_empty() {
-                            Style::default().fg(Color::Cyan)
                         } else {
                             Style::default().fg(Color::White)
                         };
@@ -1142,6 +1161,39 @@ fn draw_select_option_overlay(frame: &mut Frame, area: Rect, app: &InteractiveAp
                     })
                     .collect()
             }
+        }
+        EditField::Project => {
+            log_debug(&format!("Rendering project selection. Available projects: {}, option_index: {}", 
+                app.available_projects.len(), app.option_index));
+            
+            let mut items = vec![];
+            
+            // Add "None" option first
+            let none_style = if app.option_index == 0 {
+                Style::default().fg(Color::Black).bg(Color::Magenta)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+            items.push(ListItem::new(" None (remove project) ").style(none_style));
+            
+            // Add all available projects
+            for (i, project) in app.available_projects.iter().enumerate() {
+                let content = format!(" {} ", project.name);
+                let style = if i + 1 == app.option_index {
+                    Style::default().fg(Color::Black).bg(Color::Magenta)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                items.push(ListItem::new(content).style(style));
+            }
+            
+            log_debug(&format!("Created {} list items for project selection", items.len()));
+            
+            // If no projects available
+            if app.available_projects.is_empty() {
+                items.push(ListItem::new(" No projects available ").style(Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)));
+            }
+            items
         }
         _ => vec![],
     };
@@ -1263,4 +1315,262 @@ pub fn get_issue_links(issue: &crate::models::Issue) -> Vec<String> {
     all_links.sort();
     all_links.dedup();
     all_links
+}
+
+fn render_markdown_to_lines(text: &str) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let text_lines: Vec<&str> = text.lines().collect();
+    let mut in_code_block = false;
+    let code_block_regex = regex::Regex::new(r"^```").unwrap();
+    
+    for (i, line) in text_lines.iter().enumerate() {
+        let trimmed = line.trim();
+        
+        // Handle code blocks
+        if code_block_regex.is_match(line) {
+            in_code_block = !in_code_block;
+            if in_code_block {
+                lines.push(Line::from(vec![
+                    Span::styled("┌────────────────────────────────────────┐", Style::default().fg(Color::DarkGray)),
+                ]));
+            } else {
+                lines.push(Line::from(vec![
+                    Span::styled("└────────────────────────────────────────┘", Style::default().fg(Color::DarkGray)),
+                ]));
+            }
+            continue;
+        }
+        
+        if in_code_block {
+            lines.push(Line::from(vec![
+                Span::styled("│ ", Style::default().fg(Color::DarkGray)),
+                Span::styled(line.to_string(), Style::default().fg(Color::Cyan)),
+            ]));
+            continue;
+        }
+        
+        // Handle headers
+        if trimmed.starts_with("### ") {
+            let header = trimmed.trim_start_matches("### ");
+            lines.push(Line::from(vec![]));
+            lines.push(Line::from(vec![
+                Span::styled(header.to_string(), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            ]));
+            continue;
+        } else if trimmed.starts_with("## ") {
+            let header = trimmed.trim_start_matches("## ");
+            lines.push(Line::from(vec![]));
+            lines.push(Line::from(vec![
+                Span::styled(header.to_string(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("─".repeat(header.len()), Style::default().fg(Color::DarkGray)),
+            ]));
+            continue;
+        } else if trimmed.starts_with("# ") {
+            let header = trimmed.trim_start_matches("# ");
+            lines.push(Line::from(vec![]));
+            lines.push(Line::from(vec![
+                Span::styled(header.to_string(), Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("═".repeat(header.len()), Style::default().fg(Color::DarkGray)),
+            ]));
+            continue;
+        }
+        
+        // Handle lists
+        if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
+            let content = trimmed[2..].trim();
+            let formatted_line = render_inline_markdown(content);
+            let mut list_line = vec![Span::styled("  • ", Style::default().fg(Color::Yellow))];
+            list_line.extend(formatted_line);
+            lines.push(Line::from(list_line));
+            continue;
+        }
+        
+        // Handle numbered lists
+        let numbered_list_regex = regex::Regex::new(r"^(\d+)\.\s+(.*)$").unwrap();
+        if let Some(captures) = numbered_list_regex.captures(trimmed) {
+            let number = &captures[1];
+            let content = &captures[2];
+            let formatted_line = render_inline_markdown(content);
+            let mut list_line = vec![
+                Span::raw("  "),
+                Span::styled(format!("{}", number), Style::default().fg(Color::Cyan)),
+                Span::raw(". "),
+            ];
+            list_line.extend(formatted_line);
+            lines.push(Line::from(list_line));
+            continue;
+        }
+        
+        // Handle blockquotes
+        if trimmed.starts_with("> ") {
+            let content = trimmed[2..].trim();
+            let formatted_line = render_inline_markdown(content);
+            let mut quote_line = vec![Span::styled("│ ", Style::default().fg(Color::DarkGray))];
+            quote_line.extend(formatted_line);
+            lines.push(Line::from(quote_line));
+            continue;
+        }
+        
+        // Handle horizontal rules
+        if trimmed == "---" || trimmed == "***" || trimmed == "___" {
+            lines.push(Line::from(vec![
+                Span::styled("─".repeat(40), Style::default().fg(Color::DarkGray)),
+            ]));
+            continue;
+        }
+        
+        // Handle regular paragraphs
+        if !trimmed.is_empty() {
+            lines.push(Line::from(render_inline_markdown(line)));
+        } else if i > 0 && i < text_lines.len() - 1 {
+            // Add spacing between paragraphs
+            lines.push(Line::from(""));
+        }
+    }
+    
+    lines
+}
+
+fn render_inline_markdown(text: &str) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let mut remaining = text.to_string();
+    
+    // Process the text to find markdown elements
+    while !remaining.is_empty() {
+        // Check for inline code
+        if let Some(code_start) = remaining.find('`') {
+            if let Some(code_end) = remaining[code_start + 1..].find('`') {
+                // Add text before code
+                if code_start > 0 {
+                    spans.extend(process_text_formatting(&remaining[..code_start]));
+                }
+                
+                // Add code
+                let code_text = &remaining[code_start + 1..code_start + 1 + code_end];
+                spans.push(Span::styled(
+                    code_text.to_string(),
+                    Style::default().bg(Color::DarkGray).fg(Color::White),
+                ));
+                
+                // Continue with remaining text
+                remaining = remaining[code_start + code_end + 2..].to_string();
+                continue;
+            }
+        }
+        
+        // No more special elements, process the rest
+        spans.extend(process_text_formatting(&remaining));
+        break;
+    }
+    
+    spans
+}
+
+fn process_text_formatting(text: &str) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    let mut current_text = String::new();
+    
+    'outer: while i < chars.len() {
+        // Check for bold (**text** or __text__)
+        if i + 1 < chars.len() && ((chars[i] == '*' && chars[i + 1] == '*') || (chars[i] == '_' && chars[i + 1] == '_')) {
+            let delimiter = chars[i];
+            // Find closing delimiter
+            let mut j = i + 2;
+            while j + 1 < chars.len() {
+                if chars[j] == delimiter && chars[j + 1] == delimiter {
+                    // Found closing delimiter
+                    if !current_text.is_empty() {
+                        spans.push(Span::raw(current_text.clone()));
+                        current_text.clear();
+                    }
+                    // Ensure we have content between the delimiters
+                    if j > i + 2 {
+                        let bold_text: String = chars[i + 2..j].iter().collect();
+                        spans.push(Span::styled(bold_text, Style::default().add_modifier(Modifier::BOLD)));
+                    }
+                    i = j + 2;
+                    continue 'outer;
+                }
+                j += 1;
+            }
+        }
+        
+        // Check for italic (*text* or _text_)
+        if chars[i] == '*' || chars[i] == '_' {
+            let delimiter = chars[i];
+            // Make sure it's not part of bold
+            let is_bold = i + 1 < chars.len() && chars[i + 1] == delimiter;
+            if !is_bold {
+                // Find closing delimiter
+                let mut j = i + 1;
+                while j < chars.len() {
+                    if chars[j] == delimiter {
+                        // Found closing delimiter
+                        if !current_text.is_empty() {
+                            spans.push(Span::raw(current_text.clone()));
+                            current_text.clear();
+                        }
+                        // Ensure we have content between the delimiters
+                        if j > i + 1 {
+                            let italic_text: String = chars[i + 1..j].iter().collect();
+                            spans.push(Span::styled(italic_text, Style::default().add_modifier(Modifier::ITALIC)));
+                        }
+                        i = j + 1;
+                        continue 'outer;
+                    }
+                    j += 1;
+                }
+            }
+        }
+        
+        // Check for links [text](url)
+        if chars[i] == '[' {
+            // Find closing bracket
+            let mut j = i + 1;
+            while j < chars.len() && chars[j] != ']' {
+                j += 1;
+            }
+            if j < chars.len() && j + 1 < chars.len() && chars[j + 1] == '(' {
+                // Find closing paren
+                let mut k = j + 2;
+                while k < chars.len() && chars[k] != ')' {
+                    k += 1;
+                }
+                if k < chars.len() {
+                    // Found complete link
+                    if !current_text.is_empty() {
+                        spans.push(Span::raw(current_text.clone()));
+                        current_text.clear();
+                    }
+                    // Ensure we have content for the link text
+                    if j > i + 1 {
+                        let link_text: String = chars[i + 1..j].iter().collect();
+                        spans.push(Span::styled(
+                            link_text,
+                            Style::default().fg(Color::Blue).add_modifier(Modifier::UNDERLINED),
+                        ));
+                    }
+                    i = k + 1;
+                    continue 'outer;
+                }
+            }
+        }
+        
+        // Regular character
+        current_text.push(chars[i]);
+        i += 1;
+    }
+    
+    // Add any remaining text
+    if !current_text.is_empty() {
+        spans.push(Span::raw(current_text));
+    }
+    
+    spans
 }

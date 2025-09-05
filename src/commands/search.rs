@@ -2,7 +2,7 @@ use clap::ArgMatches;
 use colored::*;
 use crate::client::LinearClient;
 use crate::config::{get_api_key, load_config, save_config};
-use crate::filtering::{parse_filter_query, build_graphql_filter};
+use crate::filtering::FilterAdapter;
 use crate::formatting::issues::print_issues;
 
 pub async fn handle_save_search(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
@@ -11,8 +11,8 @@ pub async fn handle_save_search(matches: &ArgMatches) -> Result<(), Box<dyn std:
     let query = matches.get_one::<String>("query")
         .ok_or("Search query is required")?;
     
-    // Validate the query
-    match parse_filter_query(query) {
+    // Validate the query using the new filter system
+    match FilterAdapter::parse_and_build(query) {
         Ok(_) => {
             let mut config = load_config();
             config.saved_searches.insert(name.clone(), query.clone());
@@ -91,9 +91,8 @@ pub async fn handle_run_search(matches: &ArgMatches) -> Result<(), Box<dyn std::
         .and_then(|s| s.parse::<i32>().ok())
         .unwrap_or(50);
     
-    match parse_filter_query(query) {
-        Ok(filters) => {
-            let filter = build_graphql_filter(filters);
+    match FilterAdapter::parse_and_build(query) {
+        Ok(filter) => {
             let filter_param = if filter.as_object().unwrap().is_empty() {
                 None
             } else {
