@@ -57,6 +57,10 @@ pub enum Action {
     NextField,
     PrevField,
 
+    // Team/Project selection
+    SelectTeam,
+    SelectProject,
+
     // General
     Help,
     Quit,
@@ -71,8 +75,38 @@ pub fn map_key(key: KeyEvent, focus: &Focus, popup: &Option<Popup>) -> Action {
         return map_popup_key(key, popup);
     }
     match focus {
+        Focus::TeamList => map_team_key(key),
+        Focus::ProjectList => map_project_key(key),
         Focus::IssueList => map_list_key(key),
         Focus::DetailPanel => map_detail_key(key),
+    }
+}
+
+fn map_team_key(key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Char('q') => Action::Quit,
+        KeyCode::Char('j') | KeyCode::Down => Action::MoveDown,
+        KeyCode::Char('k') | KeyCode::Up => Action::MoveUp,
+        KeyCode::Enter => Action::SelectTeam,
+        KeyCode::Tab => Action::SwitchPanel,
+        KeyCode::BackTab => Action::FocusList, // Shift-Tab wraps to detail (handled in handler)
+        KeyCode::Char('?') => Action::Help,
+        KeyCode::Char('r') => Action::Refresh,
+        _ => Action::None,
+    }
+}
+
+fn map_project_key(key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Char('q') => Action::Quit,
+        KeyCode::Char('j') | KeyCode::Down => Action::MoveDown,
+        KeyCode::Char('k') | KeyCode::Up => Action::MoveUp,
+        KeyCode::Enter => Action::SelectProject,
+        KeyCode::Tab => Action::SwitchPanel,
+        KeyCode::BackTab => Action::FocusList, // Shift-Tab (handled in handler)
+        KeyCode::Char('?') => Action::Help,
+        KeyCode::Char('r') => Action::Refresh,
+        _ => Action::None,
     }
 }
 
