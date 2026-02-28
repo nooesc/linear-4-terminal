@@ -4,7 +4,7 @@ A Rust-based terminal client for Linear.app.
 
 Use it to read, create, and update issues, projects, and comments without opening the web app. Includes a fullscreen interactive mode for fast terminal workflows.
 
-![Linear 4 Terminal](assets/picture.png)
+![Linear 4 Terminal](assets/pic1.png)
 
 ## Installation
 
