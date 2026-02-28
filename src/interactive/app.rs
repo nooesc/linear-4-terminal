@@ -13,6 +13,8 @@ use std::error::Error;
 /// Which panel has keyboard focus
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Focus {
+    TeamList,
+    ProjectList,
     IssueList,
     DetailPanel,
 }
@@ -104,6 +106,13 @@ pub struct InteractiveApp {
     pub focus: Focus,
     pub popup: Option<Popup>,
 
+    // Team & project selectors
+    pub teams: Vec<crate::models::Team>,
+    pub active_team: Option<usize>,    // index into teams (None = all teams)
+    pub active_project: Option<usize>, // index into available_projects (0 = "All", 1+ = project)
+    pub team_index: usize,             // cursor position in teams box
+    pub project_index: usize,          // cursor position in projects box
+
     // Issue list state
     pub issues: Vec<Issue>,
     pub filtered_issues: Vec<Issue>,
@@ -166,6 +175,13 @@ impl InteractiveApp {
             focus: Focus::IssueList,
             popup: None,
 
+            // Team & project selectors
+            teams: Vec::new(),
+            active_team: None,
+            active_project: None,
+            team_index: 0,
+            project_index: 0,
+
             // Issue list
             issues: Vec::new(),
             filtered_issues: Vec::new(),
@@ -219,12 +235,13 @@ impl InteractiveApp {
         };
 
         // Make all API calls in parallel for faster startup
-        let (issues_result, states_result, labels_result, projects_result, members_result) = tokio::join!(
+        let (issues_result, states_result, labels_result, projects_result, members_result, teams_result) = tokio::join!(
             app.client.get_issues(None, Some(100)),
             app.client.get_workflow_states(),
             app.client.get_labels(),
             app.client.get_projects(),
-            app.client.get_team_members()
+            app.client.get_team_members(),
+            app.client.get_teams()
         );
 
         // Handle issues result
@@ -283,6 +300,17 @@ impl InteractiveApp {
             }
         }
 
+        // Handle teams result
+        match teams_result {
+            Ok(teams) => {
+                app.teams = teams;
+            }
+            Err(e) => {
+                log_error(&format!("Failed to fetch teams: {}", e));
+                app.teams = Vec::new();
+            }
+        }
+
         app.loading = false;
         Ok(app)
     }
@@ -338,11 +366,37 @@ impl InteractiveApp {
         }
     }
 
+    /// Build the GraphQL IssueFilter based on active team and project selections
+    pub fn build_issue_filter(&self) -> Option<serde_json::Value> {
+        let mut filter = serde_json::json!({});
+        let mut has_filter = false;
+
+        if let Some(team_idx) = self.active_team {
+            if let Some(team) = self.teams.get(team_idx) {
+                filter["team"] = serde_json::json!({"id": {"eq": team.id}});
+                has_filter = true;
+            }
+        }
+
+        if let Some(proj_idx) = self.active_project {
+            // Index 0 = "All", so only filter for index >= 1
+            if proj_idx > 0 {
+                if let Some(project) = self.available_projects.get(proj_idx - 1) {
+                    filter["project"] = serde_json::json!({"id": {"eq": project.id}});
+                    has_filter = true;
+                }
+            }
+        }
+
+        if has_filter { Some(filter) } else { None }
+    }
+
     pub async fn refresh_issues(&mut self) -> Result<(), Box<dyn Error>> {
         self.loading = true;
         self.error_message = None;
 
-        match self.client.get_issues(None, Some(100)).await {
+        let filter = self.build_issue_filter();
+        match self.client.get_issues(filter, Some(100)).await {
             Ok(issues) => {
                 self.issues = issues;
                 self.apply_filters();
