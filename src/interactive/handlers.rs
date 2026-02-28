@@ -117,7 +117,7 @@ async fn handle_action(app: &mut InteractiveApp, action: Action) {
         Action::MoveDown => {
             match app.focus {
                 Focus::TeamList => {
-                    if app.team_index < app.teams.len().saturating_sub(1) {
+                    if !app.teams.is_empty() && app.team_index < app.teams.len() - 1 {
                         app.team_index += 1;
                     }
                 }
@@ -337,9 +337,11 @@ async fn handle_action(app: &mut InteractiveApp, action: Action) {
                 } else {
                     app.active_team = Some(app.team_index);
                 }
-                // Reset project selection
+                // Reset project selection and issue cursor
                 app.active_project = None;
                 app.project_index = 0;
+                app.selected_index = 0;
+                app.detail_scroll = 0;
                 // Re-fetch issues
                 let team_name = app
                     .teams
@@ -370,6 +372,8 @@ async fn handle_action(app: &mut InteractiveApp, action: Action) {
                 } else {
                     app.active_project = Some(app.project_index);
                 }
+                app.selected_index = 0;
+                app.detail_scroll = 0;
                 let msg = if app.project_index == 0 {
                     "Showing all projects".to_string()
                 } else {
