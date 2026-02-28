@@ -41,6 +41,12 @@ pub struct TeamsData {
     pub teams: super::Connection<super::Team>,
 }
 
+// User data structures (for team members)
+#[derive(Debug, Deserialize)]
+pub struct UsersData {
+    pub users: super::Connection<super::User>,
+}
+
 // Project data structures
 #[derive(Debug, Deserialize)]
 pub struct ProjectsData {

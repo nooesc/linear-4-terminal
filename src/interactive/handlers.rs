@@ -225,6 +225,7 @@ async fn handle_action(app: &mut InteractiveApp, action: Action) {
         Action::PickerConfirm => handle_picker_confirm(app).await,
         Action::PickerCancel => {
             app.popup = None;
+            app.bulk_mode = false;
         }
         Action::PickerToggle => handle_picker_toggle(app),
 
@@ -570,6 +571,41 @@ async fn handle_confirm(app: &mut InteractiveApp) {
 // Picker confirm handler
 // ---------------------------------------------------------------------------
 
+/// Get target issue IDs: multi-selected (bulk mode) or just the selected issue
+fn get_target_ids(app: &InteractiveApp) -> Vec<String> {
+    if app.bulk_mode && !app.multi_selected.is_empty() {
+        app.get_multi_selected_issue_ids()
+    } else if let Some(issue) = app.get_selected_issue() {
+        vec![issue.id.clone()]
+    } else {
+        vec![]
+    }
+}
+
+/// Finish a bulk/single update: show result notification, clean up bulk state, refresh
+async fn finish_update(app: &mut InteractiveApp, nid: u64, success: usize, total: usize, action: &str, last_err: &str) {
+    if success == total {
+        let msg = if total > 1 {
+            format!("{} ({} issues)", action, total)
+        } else {
+            action.to_string()
+        };
+        app.replace_notification(nid, NotificationKind::Success, msg);
+    } else {
+        let msg = if total > 1 {
+            format!("Failed {}/{}: {}", total - success, total, last_err)
+        } else {
+            format!("Failed: {}", last_err)
+        };
+        app.replace_notification(nid, NotificationKind::Error, msg);
+    }
+    if app.bulk_mode {
+        app.multi_selected.clear();
+        app.bulk_mode = false;
+    }
+    let _ = app.refresh_issues().await;
+}
+
 async fn handle_picker_confirm(app: &mut InteractiveApp) {
     let popup = app.popup.clone();
     match popup {
@@ -577,204 +613,135 @@ async fn handle_picker_confirm(app: &mut InteractiveApp) {
             if let Some(state) = app.workflow_states.get(app.picker_index) {
                 let state_id = state.id.clone();
                 let state_name = state.name.clone();
-                if let Some(issue) = app.get_selected_issue() {
-                    let issue_id = issue.id.clone();
+                let ids = get_target_ids(app);
+                if !ids.is_empty() {
                     app.popup = None;
-                    let nid = app.notify(
-                        NotificationKind::Loading,
-                        format!("Setting status to {}...", state_name),
-                    );
-                    match app
-                        .client
-                        .update_issue(&issue_id, None, None, Some(&state_id), None, None, None)
-                        .await
-                    {
-                        Ok(_) => {
-                            app.replace_notification(
-                                nid,
-                                NotificationKind::Success,
-                                format!("Status -> {}", state_name),
-                            );
-                            let _ = app.refresh_issues().await;
-                        }
-                        Err(e) => {
-                            app.replace_notification(
-                                nid,
-                                NotificationKind::Error,
-                                format!("Failed: {}", e),
-                            );
+                    let action = format!("Status -> {}", state_name);
+                    let nid = app.notify(NotificationKind::Loading, format!("{}...", action));
+                    let mut ok = 0;
+                    let mut err = String::new();
+                    for id in &ids {
+                        match app.client.update_issue(id, None, None, Some(&state_id), None, None, None).await {
+                            Ok(_) => ok += 1,
+                            Err(e) => err = e.to_string(),
                         }
                     }
+                    finish_update(app, nid, ok, ids.len(), &action, &err).await;
                 }
             }
         }
         Some(Popup::PriorityPicker) => {
             let priority = app.picker_index as u8;
-            if let Some(issue) = app.get_selected_issue() {
-                let issue_id = issue.id.clone();
-                let names = ["None", "Low", "Medium", "High", "Urgent"];
-                let name = names.get(app.picker_index).unwrap_or(&"Unknown");
+            let names = ["None", "Low", "Medium", "High", "Urgent"];
+            let name = names.get(app.picker_index).unwrap_or(&"Unknown").to_string();
+            let ids = get_target_ids(app);
+            if !ids.is_empty() {
                 app.popup = None;
-                let nid = app.notify(
-                    NotificationKind::Loading,
-                    format!("Setting priority to {}...", name),
-                );
-                match app
-                    .client
-                    .update_issue(
-                        &issue_id,
-                        None,
-                        None,
-                        None,
-                        Some(priority),
-                        None,
-                        None,
-                    )
-                    .await
-                {
-                    Ok(_) => {
-                        app.replace_notification(
-                            nid,
-                            NotificationKind::Success,
-                            format!("Priority -> {}", name),
-                        );
-                        let _ = app.refresh_issues().await;
-                    }
-                    Err(e) => {
-                        app.replace_notification(
-                            nid,
-                            NotificationKind::Error,
-                            format!("Failed: {}", e),
-                        );
+                let action = format!("Priority -> {}", name);
+                let nid = app.notify(NotificationKind::Loading, format!("{}...", action));
+                let mut ok = 0;
+                let mut err = String::new();
+                for id in &ids {
+                    match app.client.update_issue(id, None, None, None, Some(priority), None, None).await {
+                        Ok(_) => ok += 1,
+                        Err(e) => err = e.to_string(),
                     }
                 }
+                finish_update(app, nid, ok, ids.len(), &action, &err).await;
             }
         }
         Some(Popup::LabelPicker) => {
-            // Submit current label selection
-            if let Some(issue) = app.get_selected_issue() {
-                let issue_id = issue.id.clone();
-                let label_ids: Vec<String> = app.selected_labels.iter().cloned().collect();
-                let label_refs: Vec<&str> = label_ids.iter().map(|s| s.as_str()).collect();
+            let label_ids: Vec<String> = app.selected_labels.iter().cloned().collect();
+            let ids = get_target_ids(app);
+            if !ids.is_empty() {
                 app.popup = None;
-                let nid =
-                    app.notify(NotificationKind::Loading, "Updating labels...".into());
-                match app
-                    .client
-                    .update_issue(&issue_id, None, None, None, None, None, Some(label_refs))
-                    .await
-                {
-                    Ok(_) => {
-                        app.replace_notification(
-                            nid,
-                            NotificationKind::Success,
-                            "Labels updated".into(),
-                        );
-                        let _ = app.refresh_issues().await;
-                    }
-                    Err(e) => {
-                        app.replace_notification(
-                            nid,
-                            NotificationKind::Error,
-                            format!("Failed: {}", e),
-                        );
+                let action = "Labels updated";
+                let nid = app.notify(NotificationKind::Loading, "Updating labels...".into());
+                let mut ok = 0;
+                let mut err = String::new();
+                for id in &ids {
+                    let refs: Vec<&str> = label_ids.iter().map(|s| s.as_str()).collect();
+                    match app.client.update_issue(id, None, None, None, None, None, Some(refs)).await {
+                        Ok(_) => ok += 1,
+                        Err(e) => err = e.to_string(),
                     }
                 }
+                finish_update(app, nid, ok, ids.len(), action, &err).await;
             }
         }
         Some(Popup::ProjectPicker) => {
-            if let Some(issue) = app.get_selected_issue() {
-                let issue_id = issue.id.clone();
+            let ids = get_target_ids(app);
+            if !ids.is_empty() {
                 if app.picker_index == 0 {
                     // "None" — remove project
                     app.popup = None;
-                    let nid = app.notify(
-                        NotificationKind::Loading,
-                        "Removing project...".into(),
-                    );
-                    match app
-                        .client
-                        .update_issue_with_project(
-                            &issue_id,
-                            None,
-                            None,
-                            None,
-                            None,
-                            None,
-                            None,
-                            Some(None),
-                        )
-                        .await
-                    {
-                        Ok(_) => {
-                            app.replace_notification(
-                                nid,
-                                NotificationKind::Success,
-                                "Project removed".into(),
-                            );
-                            let _ = app.refresh_issues().await;
-                        }
-                        Err(e) => {
-                            app.replace_notification(
-                                nid,
-                                NotificationKind::Error,
-                                format!("Failed: {}", e),
-                            );
+                    let action = "Project removed";
+                    let nid = app.notify(NotificationKind::Loading, "Removing project...".into());
+                    let mut ok = 0;
+                    let mut err = String::new();
+                    for id in &ids {
+                        match app.client.update_issue_with_project(id, None, None, None, None, None, None, Some(None)).await {
+                            Ok(_) => ok += 1,
+                            Err(e) => err = e.to_string(),
                         }
                     }
-                } else if let Some(project) =
-                    app.available_projects.get(app.picker_index - 1)
-                {
+                    finish_update(app, nid, ok, ids.len(), action, &err).await;
+                } else if let Some(project) = app.available_projects.get(app.picker_index - 1) {
                     let project_id = project.id.clone();
                     let project_name = project.name.clone();
                     app.popup = None;
-                    let nid = app.notify(
-                        NotificationKind::Loading,
-                        format!("Setting project to {}...", project_name),
-                    );
-                    match app
-                        .client
-                        .update_issue_with_project(
-                            &issue_id,
-                            None,
-                            None,
-                            None,
-                            None,
-                            None,
-                            None,
-                            Some(Some(&project_id)),
-                        )
-                        .await
-                    {
-                        Ok(_) => {
-                            app.replace_notification(
-                                nid,
-                                NotificationKind::Success,
-                                format!("Project -> {}", project_name),
-                            );
-                            let _ = app.refresh_issues().await;
-                        }
-                        Err(e) => {
-                            app.replace_notification(
-                                nid,
-                                NotificationKind::Error,
-                                format!("Failed: {}", e),
-                            );
+                    let action = format!("Project -> {}", project_name);
+                    let nid = app.notify(NotificationKind::Loading, format!("{}...", action));
+                    let mut ok = 0;
+                    let mut err = String::new();
+                    for id in &ids {
+                        match app.client.update_issue_with_project(id, None, None, None, None, None, None, Some(Some(&project_id))).await {
+                            Ok(_) => ok += 1,
+                            Err(e) => err = e.to_string(),
                         }
                     }
+                    finish_update(app, nid, ok, ids.len(), &action, &err).await;
                 }
             }
         }
         Some(Popup::AssigneePicker) => {
-            // TODO: implement when team_members is populated
-            app.popup = None;
-            app.notify(
-                NotificationKind::Info,
-                "Assignee editing coming soon".into(),
-            );
+            let ids = get_target_ids(app);
+            if !ids.is_empty() {
+                if app.picker_index == 0 {
+                    // "Unassign" — need to send null assigneeId
+                    app.popup = None;
+                    let action = "Assignee removed";
+                    let nid = app.notify(NotificationKind::Loading, "Removing assignee...".into());
+                    let mut ok = 0;
+                    let mut err = String::new();
+                    for id in &ids {
+                        match app.client.update_issue(id, None, None, None, None, Some(""), None).await {
+                            Ok(_) => ok += 1,
+                            Err(e) => err = e.to_string(),
+                        }
+                    }
+                    finish_update(app, nid, ok, ids.len(), action, &err).await;
+                } else if let Some(member) = app.team_members.get(app.picker_index - 1) {
+                    let member_id = member.id.clone();
+                    let member_name = member.name.clone();
+                    app.popup = None;
+                    let action = format!("Assignee -> {}", member_name);
+                    let nid = app.notify(NotificationKind::Loading, format!("{}...", action));
+                    let mut ok = 0;
+                    let mut err = String::new();
+                    for id in &ids {
+                        match app.client.update_issue(id, None, None, None, None, Some(&member_id), None).await {
+                            Ok(_) => ok += 1,
+                            Err(e) => err = e.to_string(),
+                        }
+                    }
+                    finish_update(app, nid, ok, ids.len(), &action, &err).await;
+                }
+            }
         }
         Some(Popup::BulkActions) => {
-            // Bulk action selection - open the appropriate picker
+            // Bulk action selection - open the appropriate picker in bulk mode
+            app.bulk_mode = true;
             match app.picker_index {
                 0 => {
                     app.picker_index = 0;
@@ -798,15 +765,39 @@ async fn handle_picker_confirm(app: &mut InteractiveApp) {
                 }
                 5 => {
                     // Archive selected issues
-                    // TODO: bulk archive
+                    let issue_ids = app.get_multi_selected_issue_ids();
+                    let count = issue_ids.len();
                     app.popup = None;
-                    app.notify(
-                        NotificationKind::Info,
-                        "Bulk archive coming soon".into(),
+                    let nid = app.notify(
+                        NotificationKind::Loading,
+                        format!("Archiving {} issues...", count),
                     );
+                    let mut success_count = 0;
+                    for id in &issue_ids {
+                        if app.client.archive_issue(id).await.is_ok() {
+                            success_count += 1;
+                        }
+                    }
+                    if success_count == count {
+                        app.replace_notification(
+                            nid,
+                            NotificationKind::Success,
+                            format!("Archived {} issues", count),
+                        );
+                    } else {
+                        app.replace_notification(
+                            nid,
+                            NotificationKind::Error,
+                            format!("Archived {}/{} issues", success_count, count),
+                        );
+                    }
+                    app.multi_selected.clear();
+                    app.bulk_mode = false;
+                    let _ = app.refresh_issues().await;
                 }
                 _ => {
                     app.popup = None;
+                    app.bulk_mode = false;
                 }
             }
         }

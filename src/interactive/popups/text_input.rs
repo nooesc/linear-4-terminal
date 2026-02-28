@@ -69,7 +69,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
         Span::styled(
             cursor_char.to_string(),
             Style::default()
-                .fg(Color::Black)
+                .fg(Color::Rgb(0, 0, 0))
                 .bg(Color::White)
                 .add_modifier(Modifier::BOLD),
         ),

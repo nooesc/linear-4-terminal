@@ -131,6 +131,7 @@ pub struct InteractiveApp {
     pub picker_index: usize,
     pub picker_search: String,
     pub selected_labels: HashSet<String>,
+    pub bulk_mode: bool, // true when picker was opened from bulk action menu
 
     // Create issue form
     pub create_form: CreateIssueForm,
@@ -192,6 +193,7 @@ impl InteractiveApp {
             picker_index: 0,
             picker_search: String::new(),
             selected_labels: HashSet::new(),
+            bulk_mode: false,
 
             // Create form
             create_form: CreateIssueForm::default(),
@@ -217,11 +219,12 @@ impl InteractiveApp {
         };
 
         // Make all API calls in parallel for faster startup
-        let (issues_result, states_result, labels_result, projects_result) = tokio::join!(
+        let (issues_result, states_result, labels_result, projects_result, members_result) = tokio::join!(
             app.client.get_issues(None, Some(100)),
             app.client.get_workflow_states(),
             app.client.get_labels(),
-            app.client.get_projects()
+            app.client.get_projects(),
+            app.client.get_team_members()
         );
 
         // Handle issues result
@@ -266,6 +269,17 @@ impl InteractiveApp {
             Err(e) => {
                 log_error(&format!("Failed to fetch projects: {}", e));
                 app.available_projects = Vec::new();
+            }
+        }
+
+        // Handle team members result
+        match members_result {
+            Ok(members) => {
+                app.team_members = members;
+            }
+            Err(e) => {
+                log_error(&format!("Failed to fetch team members: {}", e));
+                app.team_members = Vec::new();
             }
         }
 
@@ -349,6 +363,13 @@ impl InteractiveApp {
 
     pub fn get_issue_by_id(&self, id: &str) -> Option<&Issue> {
         self.issues.iter().find(|i| i.id == id)
+    }
+
+    pub fn get_multi_selected_issue_ids(&self) -> Vec<String> {
+        self.multi_selected
+            .iter()
+            .filter_map(|&idx| self.filtered_issues.get(idx).map(|i| i.id.clone()))
+            .collect()
     }
 
     pub fn open_link(&self, url: &str) -> Result<(), Box<dyn Error>> {

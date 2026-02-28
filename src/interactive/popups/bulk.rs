@@ -43,7 +43,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
         .map(|(i, option)| {
             let style = if i == app.picker_index {
                 Style::default()
-                    .fg(Color::Black)
+                    .fg(Color::Rgb(0, 0, 0))
                     .bg(Color::Cyan)
                     .add_modifier(Modifier::BOLD)
             } else {

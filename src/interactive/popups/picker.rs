@@ -84,12 +84,12 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
             )
         }
         Popup::AssigneePicker => {
-            let mut opts: Vec<(String, Color)> = app
-                .team_members
-                .iter()
-                .map(|member| (member.name.clone(), Color::Cyan))
-                .collect();
-            opts.push(("Unassign".to_string(), Color::Cyan));
+            let mut opts: Vec<(String, Color)> = vec![("Unassign".to_string(), Color::DarkGray)];
+            opts.extend(
+                app.team_members
+                    .iter()
+                    .map(|member| (member.name.clone(), Color::Cyan)),
+            );
             (
                 "Select Assignee",
                 opts,
@@ -133,7 +133,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
             let display = truncate(name, (width - 4) as usize);
             let style = if i == app.picker_index {
                 Style::default()
-                    .fg(Color::Black)
+                    .fg(Color::Rgb(0, 0, 0))
                     .bg(Color::Cyan)
                     .add_modifier(Modifier::BOLD)
             } else {
