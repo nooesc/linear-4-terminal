@@ -412,7 +412,7 @@ fn render_inline_markdown(text: &str) -> Vec<Span<'static>> {
                 let code_text = &remaining[code_start + 1..code_start + 1 + code_end];
                 spans.push(Span::styled(
                     code_text.to_string(),
-                    Style::default().bg(Color::DarkGray).fg(Color::White),
+                    Style::default().bg(Color::Rgb(40, 40, 50)).fg(Color::White),
                 ));
                 remaining = remaining[code_start + code_end + 2..].to_string();
                 continue;

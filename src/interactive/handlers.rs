@@ -219,8 +219,18 @@ async fn handle_action(app: &mut InteractiveApp, action: Action) {
             app.picker_index = app.picker_index.saturating_sub(1);
         }
         Action::PickerDown => {
-            app.picker_index += 1;
-            // Clamping happens during render
+            let max = match &app.popup {
+                Some(Popup::StatusPicker) => app.workflow_states.len().saturating_sub(1),
+                Some(Popup::PriorityPicker) => 4,
+                Some(Popup::LabelPicker) => app.available_labels.len().saturating_sub(1),
+                Some(Popup::ProjectPicker) => app.available_projects.len(), // includes "None" at 0
+                Some(Popup::AssigneePicker) => app.team_members.len(),      // includes "Unassign" at 0
+                Some(Popup::BulkActions) => 5,
+                _ => 0,
+            };
+            if app.picker_index < max {
+                app.picker_index += 1;
+            }
         }
         Action::PickerConfirm => handle_picker_confirm(app).await,
         Action::PickerCancel => {

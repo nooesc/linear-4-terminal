@@ -21,17 +21,22 @@ impl EventHandler {
         
         thread::spawn(move || {
             loop {
-                // Poll for keyboard events
-                if event::poll(Duration::from_millis(tick_rate)).unwrap() {
-                    if let Ok(CrosstermEvent::Key(key)) = event::read() {
-                        if key.kind == KeyEventKind::Press {
-                            sender_clone.send(Event::Key(key)).unwrap();
+                match event::poll(Duration::from_millis(tick_rate)) {
+                    Ok(true) => {
+                        if let Ok(CrosstermEvent::Key(key)) = event::read() {
+                            if key.kind == KeyEventKind::Press {
+                                if sender_clone.send(Event::Key(key)).is_err() {
+                                    break;
+                                }
+                            }
                         }
                     }
+                    Ok(false) => {}
+                    Err(_) => {}
                 }
-                
-                // Send tick event
-                sender_clone.send(Event::Tick).unwrap();
+                if sender_clone.send(Event::Tick).is_err() {
+                    break;
+                }
             }
         });
         
