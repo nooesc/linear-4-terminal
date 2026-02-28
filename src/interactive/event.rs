@@ -46,4 +46,9 @@ impl EventHandler {
     pub fn recv(&self) -> Result<Event, mpsc::RecvError> {
         self.receiver.recv()
     }
+
+    /// Non-blocking receive — returns None if no event is queued.
+    pub fn try_recv(&self) -> Option<Event> {
+        self.receiver.try_recv().ok()
+    }
 }

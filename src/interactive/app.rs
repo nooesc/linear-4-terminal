@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::Instant;
 use crate::models::{Issue, WorkflowState, Comment};
 use crate::client::LinearClient;
@@ -150,7 +151,7 @@ pub struct InteractiveApp {
     pub next_notification_id: u64,
 
     // Data
-    pub client: LinearClient,
+    pub client: Arc<LinearClient>,
     pub workflow_states: Vec<WorkflowState>,
     pub available_labels: Vec<crate::models::issue::Label>,
     pub available_projects: Vec<crate::models::Project>,
@@ -168,7 +169,7 @@ pub struct InteractiveApp {
 impl InteractiveApp {
     pub async fn new() -> Result<Self, Box<dyn Error>> {
         let api_key = get_api_key()?;
-        let client = LinearClient::new(api_key)?;
+        let client = Arc::new(LinearClient::new(api_key)?);
 
         let mut app = Self {
             // Layout

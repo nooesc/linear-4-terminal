@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
@@ -16,9 +17,17 @@ pub fn draw_projects(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
         Style::default().fg(Color::DarkGray)
     };
 
-    // +1 for the "All" option
-    let count = app.available_projects.len() + 1;
-    let title = format!(" Projects ({}) ", count);
+    // Count issues per project from loaded issues
+    let mut project_counts: HashMap<&str, usize> = HashMap::new();
+    let mut total_issues = 0usize;
+    for issue in &app.issues {
+        total_issues += 1;
+        if let Some(ref proj) = issue.project {
+            *project_counts.entry(&proj.id).or_insert(0) += 1;
+        }
+    }
+
+    let title = format!(" Projects ({}) ", app.available_projects.len());
     let block = Block::default()
         .borders(Borders::ALL)
         .title(title)
@@ -32,12 +41,15 @@ pub fn draw_projects(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
     };
 
     // Build options: "All" at index 0, then each project
-    let mut options: Vec<(usize, String)> = vec![(0, "All".to_string())];
+    let mut options: Vec<(usize, String)> = vec![(0, format!("All ({})", total_issues))];
     options.extend(
         app.available_projects
             .iter()
             .enumerate()
-            .map(|(i, p)| (i + 1, p.name.clone())),
+            .map(|(i, p)| {
+                let count = project_counts.get(p.id.as_str()).copied().unwrap_or(0);
+                (i + 1, format!("{} ({})", p.name, count))
+            }),
     );
 
     let items: Vec<ListItem> = options

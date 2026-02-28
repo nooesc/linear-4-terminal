@@ -4,6 +4,9 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
+use std::sync::Arc;
+use std::time::Instant;
+use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::config::get_api_key;
 use crate::interactive::app::{
@@ -12,6 +15,12 @@ use crate::interactive::app::{
 };
 use crate::interactive::keys::{self, Action};
 use super::event::{Event, EventHandler};
+
+/// Result from a background comment fetch
+struct CommentResult {
+    issue_id: String,
+    comments: Result<Vec<crate::models::Comment>, Box<dyn std::error::Error + Send + Sync>>,
+}
 
 pub async fn run_interactive_mode() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Check API key
@@ -30,27 +39,25 @@ pub async fn run_interactive_mode() -> Result<(), Box<dyn std::error::Error>> {
 
     // 3. Create app
     let mut app = InteractiveApp::new().await?;
-    let events = EventHandler::new(100); // 100ms tick rate
+    let events = EventHandler::new(16); // ~60fps tick rate
 
-    // Track which issue we last fetched comments for
+    // Background comment fetching
+    let (comment_tx, mut comment_rx) = tokio_mpsc::channel::<CommentResult>(4);
     let mut last_detail_issue_id: Option<String> = None;
+    let mut last_nav_time = Instant::now();
+    let mut pending_comment_issue: Option<String> = None;
+    const COMMENT_DEBOUNCE_MS: u128 = 200;
 
     // Main loop
     loop {
         // Tick notifications
         app.tick_notifications();
 
-        // Draw UI
-        terminal.draw(|f| super::ui::draw(f, &app))?;
-
-        // Fetch comments if selected issue changed
-        if let Some(issue) = app.get_selected_issue() {
-            let issue_id = issue.id.clone();
-            if last_detail_issue_id.as_ref() != Some(&issue_id) {
-                last_detail_issue_id = Some(issue_id.clone());
-                app.comments_loading = true;
-                app.comments.clear();
-                match app.client.get_comments(&issue_id).await {
+        // Check for completed background comment fetches
+        while let Ok(result) = comment_rx.try_recv() {
+            // Only apply if this is still the selected issue
+            if last_detail_issue_id.as_ref() == Some(&result.issue_id) {
+                match result.comments {
                     Ok(comments) => {
                         app.comments = comments;
                         app.comments_loading = false;
@@ -62,13 +69,65 @@ pub async fn run_interactive_mode() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        // Handle events
-        match events.recv()? {
+        // Debounced comment fetch: only fire after user stops navigating
+        if let Some(ref pending_id) = pending_comment_issue {
+            if last_nav_time.elapsed().as_millis() >= COMMENT_DEBOUNCE_MS {
+                let issue_id = pending_id.clone();
+                pending_comment_issue = None;
+                app.comments_loading = true;
+                app.comments.clear();
+                let client = Arc::clone(&app.client);
+                let tx = comment_tx.clone();
+                tokio::spawn(async move {
+                    let comments = client.get_comments(&issue_id).await
+                        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                            format!("{}", e).into()
+                        });
+                    let _ = tx.send(CommentResult { issue_id, comments }).await;
+                });
+            }
+        }
+
+        // Draw UI
+        terminal.draw(|f| super::ui::draw(f, &app))?;
+
+        // Handle events — drain all queued events to avoid lag
+        let first = events.recv()?;
+        let mut actions = Vec::new();
+        match first {
             Event::Key(key) => {
-                let action = keys::map_key(key, &app.focus, &app.popup);
-                handle_action(&mut app, action).await;
+                actions.push(keys::map_key(key, &app.focus, &app.popup));
             }
             Event::Tick => {}
+        }
+        // Drain remaining queued events
+        while let Some(ev) = events.try_recv() {
+            if let Event::Key(key) = ev {
+                actions.push(keys::map_key(key, &app.focus, &app.popup));
+            }
+        }
+
+        // Collapse consecutive pure-navigation actions
+        let actions = collapse_nav_actions(actions);
+
+        for action in actions {
+            handle_action(&mut app, action).await;
+            if app.should_quit {
+                break;
+            }
+        }
+
+        // Schedule comment fetch if selected issue changed
+        if let Some(issue) = app.get_selected_issue() {
+            let issue_id = issue.id.clone();
+            if last_detail_issue_id.as_ref() != Some(&issue_id) {
+                last_detail_issue_id = Some(issue_id.clone());
+                last_nav_time = Instant::now();
+                pending_comment_issue = Some(issue_id);
+                // Show loading immediately but don't block
+                app.comments.clear();
+                app.comments_loading = true;
+            }
         }
 
         if app.should_quit {
@@ -82,6 +141,59 @@ pub async fn run_interactive_mode() -> Result<(), Box<dyn std::error::Error>> {
     terminal.show_cursor()?;
 
     Ok(())
+}
+
+/// Collapse consecutive MoveUp/MoveDown/ScrollUp/ScrollDown into net movement.
+/// Non-navigation actions are preserved in order.
+fn collapse_nav_actions(actions: Vec<Action>) -> Vec<Action> {
+    if actions.len() <= 1 {
+        return actions;
+    }
+
+    let mut result = Vec::new();
+    let mut nav_count: i32 = 0;
+    let mut in_nav_run = false;
+
+    for action in actions {
+        match action {
+            Action::MoveDown | Action::ScrollDown => {
+                nav_count += 1;
+                in_nav_run = true;
+            }
+            Action::MoveUp | Action::ScrollUp => {
+                nav_count -= 1;
+                in_nav_run = true;
+            }
+            other => {
+                // Flush pending nav
+                if in_nav_run {
+                    flush_nav(&mut result, nav_count);
+                    nav_count = 0;
+                    in_nav_run = false;
+                }
+                result.push(other);
+            }
+        }
+    }
+
+    if in_nav_run {
+        flush_nav(&mut result, nav_count);
+    }
+
+    result
+}
+
+fn flush_nav(result: &mut Vec<Action>, net: i32) {
+    let (action, count) = if net > 0 {
+        (Action::MoveDown, net as usize)
+    } else if net < 0 {
+        (Action::MoveUp, (-net) as usize)
+    } else {
+        return; // net zero — user went down then back up
+    };
+    for _ in 0..count {
+        result.push(action);
+    }
 }
 
 // ---------------------------------------------------------------------------

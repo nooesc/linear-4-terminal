@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use crate::interactive::app::{Focus, Popup, TextInputContext};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Action {
     // Navigation
     MoveUp,
