@@ -4,26 +4,27 @@ use serde_json::{json, Value};
 
 use crate::constants::{COMMENT_FIELDS, ISSUE_FIELDS, LINEAR_API_URL, PROJECT_FIELDS};
 use crate::models::*;
+use crate::error::LinearError;
 
 pub struct LinearClient {
     client: reqwest::Client,
 }
 
 impl LinearClient {
-    pub fn new(api_key: String) -> Self {
+    pub fn new(api_key: String) -> Result<Self, LinearError> {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        headers.insert(
-            AUTHORIZATION,
-            HeaderValue::from_str(&api_key).expect("Invalid API key format"),
-        );
+        let api_key = api_key.trim();
+        let header_value = HeaderValue::from_str(api_key)
+            .map_err(|e| LinearError::ApiError(format!("Invalid API key format: {e}")))?;
+        headers.insert(AUTHORIZATION, header_value);
 
         let client = reqwest::Client::builder()
             .default_headers(headers)
             .build()
-            .expect("Failed to create HTTP client");
+            .map_err(|e| LinearError::ApiError(format!("Failed to create HTTP client: {e}")))?;
 
-        Self { client }
+        Ok(Self { client })
     }
 
     async fn execute_query<T: for<'de> Deserialize<'de>>(
@@ -127,6 +128,23 @@ impl LinearClient {
 
         let data: graphql::TeamsData = self.execute_query(query, None).await?;
         Ok(data.teams.nodes)
+    }
+
+    pub async fn get_team_members(&self) -> Result<Vec<User>, Box<dyn std::error::Error>> {
+        let query = r#"
+            query {
+                users(first: 100) {
+                    nodes {
+                        id
+                        name
+                        email
+                    }
+                }
+            }
+        "#;
+
+        let data: graphql::UsersData = self.execute_query(query, None).await?;
+        Ok(data.users.nodes)
     }
 
     pub async fn get_projects(&self) -> Result<Vec<Project>, Box<dyn std::error::Error>> {
@@ -269,7 +287,11 @@ impl LinearClient {
             input["priority"] = json!(prio);
         }
         if let Some(assignee) = assignee_id {
-            input["assigneeId"] = json!(assignee);
+            if assignee.is_empty() {
+                input["assigneeId"] = json!(null);
+            } else {
+                input["assigneeId"] = json!(assignee);
+            }
         }
         if let Some(labels) = label_ids {
             input["labelIds"] = json!(labels);
@@ -281,9 +303,9 @@ impl LinearClient {
             }
         }
 
-        let variables = json!({ 
+        let variables = json!({
             "id": issue_id,
-            "input": input 
+            "input": input
         });
 
         let data: graphql::IssueUpdateData = self.execute_query(&query, Some(variables)).await?;
@@ -468,7 +490,11 @@ impl LinearClient {
             input["stateId"] = json!(state_id);
         }
         if let Some(assignee_id) = assignee_id {
-            input["assigneeId"] = json!(assignee_id);
+            if assignee_id.is_empty() {
+                input["assigneeId"] = json!(null);
+            } else {
+                input["assigneeId"] = json!(assignee_id);
+            }
         }
         if let Some(priority) = priority {
             input["priority"] = json!(priority);

@@ -21,17 +21,27 @@ impl EventHandler {
         
         thread::spawn(move || {
             loop {
-                // Poll for keyboard events
-                if event::poll(Duration::from_millis(tick_rate)).unwrap() {
-                    if let Ok(CrosstermEvent::Key(key)) = event::read() {
-                        if key.kind == KeyEventKind::Press {
-                            sender_clone.send(Event::Key(key)).unwrap();
+                match event::poll(Duration::from_millis(tick_rate)) {
+                    Ok(true) => {
+                        match event::read() {
+                            Ok(CrosstermEvent::Key(key)) if key.kind == KeyEventKind::Press => {
+                                if sender_clone.send(Event::Key(key)).is_err() {
+                                    break;
+                                }
+                            }
+                            Ok(CrosstermEvent::Resize(_, _)) => {
+                                // Terminal resized — send a tick to trigger redraw
+                                // (event already consumed, next draw will use new size)
+                            }
+                            _ => {}
                         }
                     }
+                    Ok(false) => {}
+                    Err(_) => {}
                 }
-                
-                // Send tick event
-                sender_clone.send(Event::Tick).unwrap();
+                if sender_clone.send(Event::Tick).is_err() {
+                    break;
+                }
             }
         });
         
@@ -40,5 +50,10 @@ impl EventHandler {
     
     pub fn recv(&self) -> Result<Event, mpsc::RecvError> {
         self.receiver.recv()
+    }
+
+    /// Non-blocking receive — returns None if no event is queued.
+    pub fn try_recv(&self) -> Option<Event> {
+        self.receiver.try_recv().ok()
     }
 }

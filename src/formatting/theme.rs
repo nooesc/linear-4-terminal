@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use colored::{Color, Colorize};
 use lazy_static::lazy_static;
 use std::sync::RwLock;
@@ -54,14 +56,14 @@ impl ColorTheme {
         let mut colors = std::collections::HashMap::new();
         
         // Status colors
-        colors.insert(SemanticColor::StatusBacklog, Color::TrueColor { r: 128, g: 128, b: 128 });
+        colors.insert(SemanticColor::StatusBacklog, Color::TrueColor { r: 124, g: 124, b: 124 });
         colors.insert(SemanticColor::StatusUnstarted, Color::Blue);
         colors.insert(SemanticColor::StatusStarted, Color::Yellow);
         colors.insert(SemanticColor::StatusCompleted, Color::Green);
         colors.insert(SemanticColor::StatusCanceled, Color::Red);
         
         // Priority colors
-        colors.insert(SemanticColor::PriorityNone, Color::TrueColor { r: 128, g: 128, b: 128 });
+        colors.insert(SemanticColor::PriorityNone, Color::TrueColor { r: 90, g: 90, b: 90 });
         colors.insert(SemanticColor::PriorityUrgent, Color::BrightRed);
         colors.insert(SemanticColor::PriorityHigh, Color::Red);
         colors.insert(SemanticColor::PriorityMedium, Color::Yellow);
@@ -74,8 +76,8 @@ impl ColorTheme {
         colors.insert(SemanticColor::Assignee, Color::Blue);
         
         // UI colors
-        colors.insert(SemanticColor::Header, Color::Cyan);
-        colors.insert(SemanticColor::Border, Color::TrueColor { r: 100, g: 100, b: 100 });
+        colors.insert(SemanticColor::Header, Color::TrueColor { r: 21, g: 76, b: 121 });
+        colors.insert(SemanticColor::Border, Color::TrueColor { r: 120, g: 120, b: 120 });
         colors.insert(SemanticColor::Selection, Color::BrightYellow);
         colors.insert(SemanticColor::Highlight, Color::BrightMagenta);
         colors.insert(SemanticColor::Error, Color::Red);
@@ -84,9 +86,9 @@ impl ColorTheme {
         colors.insert(SemanticColor::Info, Color::Blue);
         
         // Text colors
-        colors.insert(SemanticColor::Primary, Color::White);
-        colors.insert(SemanticColor::Secondary, Color::TrueColor { r: 200, g: 200, b: 200 });
-        colors.insert(SemanticColor::Muted, Color::TrueColor { r: 128, g: 128, b: 128 });
+        colors.insert(SemanticColor::Primary, Color::Black);
+        colors.insert(SemanticColor::Secondary, Color::TrueColor { r: 40, g: 40, b: 40 });
+        colors.insert(SemanticColor::Muted, Color::TrueColor { r: 90, g: 90, b: 90 });
         colors.insert(SemanticColor::Link, Color::Blue);
         
         Self { colors }

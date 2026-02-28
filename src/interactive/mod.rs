@@ -1,10 +1,9 @@
 pub mod app;
-pub mod ui;
 pub mod event;
 pub mod handlers;
-pub mod state;
-pub mod state_adapter;
-
-// Example usage of the new state system (compile with --features examples)
-#[cfg(feature = "examples")]
-pub mod state_example;
+pub mod keys;
+pub mod layout;
+pub mod notifications;
+pub mod panels;
+pub mod popups;
+pub mod ui;

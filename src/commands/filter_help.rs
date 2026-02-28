@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use clap::ArgMatches;
 use crate::filtering::print_filter_examples;
 

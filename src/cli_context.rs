@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::client::LinearClient;
 use crate::config::{get_api_key, save_config, load_config};
 use crate::error::{LinearError, LinearResult};
@@ -21,9 +23,8 @@ impl CliContext {
     /// Load context from saved configuration
     pub fn load() -> LinearResult<Self> {
         let api_key = get_api_key().ok();
-        let client = api_key.as_ref().map(|key| Arc::new(LinearClient::new(key.clone())));
-        
-        Ok(Self { api_key, client })
+
+        Ok(Self { api_key, client: None })
     }
     
     /// Get or create a verified client (requires API key)
@@ -33,7 +34,7 @@ impl CliContext {
         }
         
         let api_key = self.api_key()?.clone();
-        let client = Arc::new(LinearClient::new(api_key));
+        let client = Arc::new(LinearClient::new(api_key)?);
         self.client = Some(client.clone());
         Ok(client)
     }
@@ -45,7 +46,10 @@ impl CliContext {
         }
         
         if let Ok(api_key) = self.api_key() {
-            let client = Arc::new(LinearClient::new(api_key.clone()));
+            let client = match LinearClient::new(api_key.clone()) {
+                Ok(client) => Arc::new(client),
+                Err(_) => return None,
+            };
             self.client = Some(client.clone());
             return self.client.clone();
         }
@@ -68,7 +72,7 @@ impl CliContext {
         config.api_key = Some(api_key.clone());
         save_config(&config).map_err(|e| LinearError::ConfigError(e.to_string()))?;
         self.api_key = Some(api_key.clone());
-        self.client = Some(Arc::new(LinearClient::new(api_key)));
+        self.client = Some(Arc::new(LinearClient::new(api_key)?));
         Ok(())
     }
     
@@ -95,7 +99,7 @@ impl CliContextBuilder {
     
     pub fn build(self) -> LinearResult<CliContext> {
         let context = if let Some(api_key) = self.api_key {
-            let client = Some(Arc::new(LinearClient::new(api_key.clone())));
+            let client = Some(Arc::new(LinearClient::new(api_key.clone())?));
             CliContext {
                 api_key: Some(api_key),
                 client,

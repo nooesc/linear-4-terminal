@@ -1,7 +1,10 @@
 use chrono::{Duration, Utc};
 use regex::Regex;
 
-use super::builder::{FilterBuilder, FilterField, FilterOperator, FilterValue};
+use super::builder::{
+    FilterBuilder, FilterCondition, FilterExpression, FilterField, FilterGroup, FilterOperator, FilterValue,
+    LogicalOperator,
+};
 
 /// Token types for the filter parser
 #[derive(Debug, Clone, PartialEq)]
@@ -18,9 +21,9 @@ enum Token {
     Comma,
 }
 
-/// Tokenizer for filter queries
+/// UTF-8 safe tokenizer for filter queries
 struct Tokenizer {
-    input: String,
+    chars: Vec<char>,
     position: usize,
     last_operator: Option<String>,
 }
@@ -28,30 +31,38 @@ struct Tokenizer {
 impl Tokenizer {
     fn new(input: &str) -> Self {
         Self {
-            input: input.to_string(),
+            chars: input.chars().collect(),
             position: 0,
             last_operator: None,
         }
     }
-    
+
     fn tokenize(&mut self) -> Result<Vec<Token>, ParseError> {
         let mut tokens = Vec::new();
-        
-        while self.position < self.input.len() {
+
+        while self.position < self.chars.len() {
             self.skip_whitespace();
-            
-            if self.position >= self.input.len() {
+
+            if self.position >= self.chars.len() {
                 break;
             }
-            
-            // Check for operators and keywords
-            if let Some(token) = self.try_parse_operator() {
-                tokens.push(token);
+
+            let token = if let Some(token) = self.try_parse_operator() {
+                Some(token)
             } else if let Some(token) = self.try_parse_keyword() {
-                tokens.push(token);
+                Some(token)
             } else if let Some(token) = self.try_parse_special() {
-                tokens.push(token);
-            } else if let Some(token) = self.try_parse_value() {
+                Some(token)
+            } else if let Some(token) = self.try_parse_value()? {
+                Some(token)
+            } else {
+                return Err(ParseError::UnexpectedCharacter {
+                    position: self.position,
+                    char: self.current_char().unwrap_or(' '),
+                });
+            };
+
+            if let Some(token) = token {
                 tokens.push(token);
             } else {
                 return Err(ParseError::UnexpectedCharacter {
@@ -60,48 +71,100 @@ impl Tokenizer {
                 });
             }
         }
-        
+
         Ok(tokens)
     }
-    
+
     fn skip_whitespace(&mut self) {
-        while self.position < self.input.len() && self.current_char().unwrap_or(' ').is_whitespace() {
-            self.position += 1;
-        }
-    }
-    
-    fn current_char(&self) -> Option<char> {
-        self.input.chars().nth(self.position)
-    }
-    
-    fn peek_string(&self, len: usize) -> Option<String> {
-        if self.position + len > self.input.len() {
-            return None;
-        }
-        Some(self.input[self.position..self.position + len].to_string())
-    }
-    
-    fn try_parse_operator(&mut self) -> Option<Token> {
-        // Check for two-character operators first
-        if let Some(s) = self.peek_string(2) {
-            let op = match s.as_str() {
-                "!=" => Some("!="),
-                ">=" => Some(">="),
-                "<=" => Some("<="),
-                "~=" => Some("~="),
-                "^=" => Some("^="),
-                "$=" => Some("$="),
-                _ => None,
-            };
-            
-            if let Some(op) = op {
-                self.position += 2;
-                self.last_operator = Some(op.to_string());
-                return Some(Token::Operator(op.to_string()));
+        while let Some(c) = self.current_char() {
+            if c.is_whitespace() {
+                self.position += 1;
+            } else {
+                break;
             }
         }
-        
-        // Single character operators
+    }
+
+    fn current_char(&self) -> Option<char> {
+        self.chars.get(self.position).copied()
+    }
+
+    fn peek_char(&self, offset: usize) -> Option<char> {
+        self.chars.get(self.position + offset).copied()
+    }
+
+    #[allow(dead_code)]
+    fn peek_literal(&self, literal: &str) -> bool {
+        let mut index = 0;
+        for expected in literal.chars() {
+            if self.chars.get(self.position + index).copied() != Some(expected) {
+                return false;
+            }
+            index += 1;
+        }
+
+        true
+    }
+
+    fn starts_with_keyword(&self, keyword: &str) -> bool {
+        let keyword_len = keyword.chars().count();
+        let left_boundary = self.position == 0 || !self.is_word_char(self.chars.get(self.position - 1).copied());
+        let right_boundary = if keyword.ends_with(':') {
+            true
+        } else {
+            self.is_word_boundary_at(self.position + keyword_len)
+        };
+
+        left_boundary
+            && right_boundary
+            && self.starts_with_case_insensitive(keyword)
+    }
+
+    fn starts_with_case_insensitive(&self, expected: &str) -> bool {
+        let mut index = 0;
+        for expected_char in expected.chars() {
+            if self.chars.get(self.position + index).copied().unwrap_or('\0').to_ascii_lowercase()
+                != expected_char.to_ascii_lowercase()
+            {
+                return false;
+            }
+
+            index += 1;
+        }
+
+        true
+    }
+
+    fn is_word_char(&self, c: Option<char>) -> bool {
+        c.map(|c| c.is_alphanumeric() || c == '_').unwrap_or(false)
+    }
+
+    fn is_word_boundary_at(&self, index: usize) -> bool {
+        if index >= self.chars.len() {
+            true
+        } else {
+            !self.is_word_char(self.chars.get(index).copied())
+        }
+    }
+
+    fn try_parse_operator(&mut self) -> Option<Token> {
+        let op = match (self.current_char(), self.peek_char(1)) {
+            (Some('!'), Some('=')) => Some("!="),
+            (Some('!'), Some('~')) => Some("!~"),
+            (Some('>'), Some('=')) => Some(">="),
+            (Some('<'), Some('=')) => Some("<="),
+            (Some('~'), Some('=')) => Some("~="),
+            (Some('^'), Some('=')) => Some("^="),
+            (Some('$'), Some('=')) => Some("$="),
+            _ => None,
+        };
+
+        if let Some(operator) = op {
+            self.position += 2;
+            self.last_operator = Some(operator.to_string());
+            return Some(Token::Operator(operator.to_string()));
+        }
+
         match self.current_char()? {
             '=' => {
                 self.position += 1;
@@ -123,44 +186,55 @@ impl Tokenizer {
                 self.last_operator = Some("~".to_string());
                 Some(Token::Operator("~".to_string()))
             }
+            '^' => {
+                self.position += 1;
+                self.last_operator = Some("^".to_string());
+                Some(Token::Operator("^".to_string()))
+            }
+            '$' => {
+                self.position += 1;
+                self.last_operator = Some("$".to_string());
+                Some(Token::Operator("$".to_string()))
+            }
+            '!' => {
+                self.position += 1;
+                self.last_operator = Some("!".to_string());
+                Some(Token::Operator("!".to_string()))
+            }
             _ => None,
         }
     }
-    
+
     fn try_parse_keyword(&mut self) -> Option<Token> {
-        let remaining = &self.input[self.position..];
-        
-        // Try to match keywords
-        if remaining.to_lowercase().starts_with("and") && self.is_word_boundary(self.position + 3) {
+        if self.starts_with_keyword("and") {
             self.position += 3;
             return Some(Token::And);
         }
-        
-        if remaining.to_lowercase().starts_with("or") && self.is_word_boundary(self.position + 2) {
+
+        if self.starts_with_keyword("or") {
             self.position += 2;
             return Some(Token::Or);
         }
-        
-        if remaining.to_lowercase().starts_with("not") && self.is_word_boundary(self.position + 3) {
+
+        if self.starts_with_keyword("not") {
             self.position += 3;
             return Some(Token::Not);
         }
-        
-        // Try to match special operators
-        if remaining.starts_with("in:") {
+
+        if self.starts_with_keyword("in:") {
             self.position += 3;
             self.last_operator = Some("in".to_string());
             return Some(Token::Operator("in".to_string()));
         }
-        
-        if remaining.starts_with("has:") {
+
+        if self.starts_with_keyword("has:") {
             self.position += 4;
             return Some(Token::Operator("has".to_string()));
         }
-        
+
         None
     }
-    
+
     fn try_parse_special(&mut self) -> Option<Token> {
         match self.current_char()? {
             ':' => {
@@ -182,84 +256,136 @@ impl Tokenizer {
             _ => None,
         }
     }
-    
-    fn try_parse_value(&mut self) -> Option<Token> {
-        let start = self.position;
-        
-        // Check if value is quoted
-        if self.current_char() == Some('"') {
-            self.position += 1;
-            while self.position < self.input.len() && self.current_char() != Some('"') {
-                if self.current_char() == Some('\\') {
-                    self.position += 2; // Skip escaped character
-                } else {
-                    self.position += 1;
-                }
-            }
-            
-            if self.current_char() == Some('"') {
+
+    fn try_parse_value(&mut self) -> Result<Option<Token>, ParseError> {
+        if self.current_char() != Some('"') {
+            return Ok(self.parse_unquoted_value());
+        }
+
+        self.position += 1;
+        let mut value = String::new();
+
+        while let Some(c) = self.current_char() {
+            if c == '"' {
                 self.position += 1;
-                let value = self.input[start + 1..self.position - 1].to_string();
-                return Some(Token::Value(value));
+                return Ok(Some(Token::Value(value)));
             }
+
+            if c == '\\' {
+                self.position += 1;
+
+                match self.current_char() {
+                    Some(next) => {
+                        value.push(next);
+                        self.position += 1;
+                    }
+                    None => {
+                        return Err(ParseError::UnterminatedString {
+                            position: self.position,
+                        })
+                    }
+                }
+
+                continue;
+            }
+
+            value.push(c);
+            self.position += 1;
         }
-        
-        // Parse unquoted value
-        // If last operator was "in", include commas in the value
+
+        Err(ParseError::UnterminatedString {
+            position: self.position,
+        })
+    }
+
+    fn parse_unquoted_value(&mut self) -> Option<Token> {
+        let start = self.position;
         let include_commas = self.last_operator.as_deref() == Some("in");
-        
-        while self.position < self.input.len() {
-            match self.current_char() {
-                Some(c) if c.is_alphanumeric() || c == '_' || c == '-' || c == '.' || c == '@' => {
-                    self.position += 1;
-                }
-                Some(',') if include_commas => {
-                    self.position += 1;
-                }
-                _ => break,
+
+        let mut position = self.position;
+        while position < self.chars.len() {
+            let c = self.chars[position];
+            let next = self.chars.get(position + 1).copied();
+
+            if c.is_whitespace() || c == ':' || c == '(' || c == ')' || (!include_commas && c == ',') {
+                break;
+            }
+
+            if c == '!'
+                || c == '='
+                || c == '>'
+                || c == '<'
+                || c == '~'
+                || c == '^'
+                || c == '$'
+                || (c == '!' && (next == Some('=') || next == Some('~')))
+                || (c == '~' && next == Some('='))
+                || (c == '^' && next == Some('='))
+                || (c == '$' && next == Some('='))
+            {
+                break;
+            }
+
+            position += 1;
+        }
+
+        if position == start {
+            return None;
+        }
+
+        let mut is_field = false;
+        let value: String = self.chars[start..position].iter().collect();
+        self.position = position;
+
+        if position + 1 <= self.chars.len() {
+            if let Some(lookahead) = self.chars.get(position) {
+                is_field = match lookahead {
+                    ':' => true,
+                    '!' => self.is_operator_prefix(*lookahead, self.chars.get(position + 1).copied()),
+                    '=' => true,
+                    '>' => true,
+                    '<' => true,
+                    '~' => true,
+                    '^' => true,
+                    '$' => true,
+                    _ => {
+                        self.starts_with_keyword_from("in:", position)
+                            || self.starts_with_keyword_from("has:", position)
+                    }
+                };
             }
         }
-        
-        if self.position > start {
-            let value = self.input[start..self.position].to_string();
-            
-            // Determine if it's a field or value based on what follows
-            let saved_pos = self.position;
-            self.skip_whitespace();
-            
-            // Check if followed by an operator (including special ones like "in:")
-            let is_field = self.current_char() == Some(':') 
-                || self.peek_string(2) == Some("!=".to_string()) 
-                || self.peek_string(2) == Some(">=".to_string()) 
-                || self.peek_string(2) == Some("<=".to_string())
-                || self.current_char() == Some('>')
-                || self.current_char() == Some('<')
-                || self.current_char() == Some('=')
-                || self.current_char() == Some('~')
-                || self.peek_string(3) == Some("in:".to_string())
-                || self.peek_string(4) == Some("has:".to_string());
-                
-            self.position = saved_pos; // Restore position
-            
-            if is_field {
-                Some(Token::Field(value))
-            } else {
-                Some(Token::Value(value))
-            }
+
+        if is_field {
+            Some(Token::Field(value))
         } else {
-            None
+            Some(Token::Value(value))
         }
     }
-    
-    fn is_word_boundary(&self, pos: usize) -> bool {
-        if pos >= self.input.len() {
-            return true;
+
+    fn is_operator_prefix(&self, first: char, second: Option<char>) -> bool {
+        matches!(
+            (first, second),
+            ('!', Some('=')) | ('!', Some('~')) | ('>', Some('=')) | ('<', Some('=')) | ('~', Some('=')) | ('^', Some('=')) | ('$',
+            Some('='))
+        ) || first == '='
+            || first == '>'
+            || first == '<'
+            || first == '~'
+            || first == '^'
+            || first == '$'
+    }
+
+    fn starts_with_keyword_from(&self, keyword: &str, position: usize) -> bool {
+        let mut index = 0;
+        for expected in keyword.chars() {
+            if self.chars.get(position + index).copied() != Some(expected) {
+                return false;
+            }
+            index += 1;
         }
-        
-        match self.input.chars().nth(pos) {
-            Some(c) if c.is_alphanumeric() => false,
-            _ => true,
-        }
+
+        true
     }
 }
 
@@ -273,151 +399,162 @@ impl FilterParser {
     pub fn new(input: &str) -> Result<Self, ParseError> {
         let mut tokenizer = Tokenizer::new(input);
         let tokens = tokenizer.tokenize()?;
-        
+
         Ok(Self {
             tokens,
             position: 0,
         })
     }
-    
-    /// Parse the filter query and return a FilterBuilder
+
+    /// Parse the filter query and return a `FilterBuilder`
     pub fn parse(&mut self) -> Result<FilterBuilder, ParseError> {
-        let mut builder = FilterBuilder::new();
-        
-        // Parse the expression
-        self.parse_expression(&mut builder)?;
-        
-        // Ensure we consumed all tokens
+        if self.tokens.is_empty() {
+            return Err(ParseError::UnexpectedEndOfInput);
+        }
+
+        let expression = self.parse_or_expression()?;
+
         if self.position < self.tokens.len() {
             return Err(ParseError::UnexpectedToken {
                 token: format!("{:?}", self.tokens[self.position]),
                 position: self.position,
             });
         }
-        
-        Ok(builder)
+
+        Ok(FilterBuilder::from_expression(expression))
     }
-    
-    fn parse_expression(&mut self, builder: &mut FilterBuilder) -> Result<(), ParseError> {
-        // Parse first condition
-        self.parse_condition(builder)?;
-        
-        // Parse additional conditions with operators
-        while self.position < self.tokens.len() {
-            match &self.tokens[self.position] {
-                Token::And => {
-                    self.position += 1;
-                    builder.and();
-                    self.parse_condition(builder)?;
-                }
-                Token::Or => {
-                    self.position += 1;
-                    builder.or();
-                    self.parse_condition(builder)?;
-                }
-                _ => break,
-            }
+
+    fn parse_or_expression(&mut self) -> Result<FilterExpression, ParseError> {
+        let mut expr = self.parse_and_expression()?;
+
+        while self.consume_token(&Token::Or) {
+            let right = self.parse_and_expression()?;
+            expr = self.combine_expressions(LogicalOperator::Or, expr, right);
         }
-        
-        Ok(())
+
+        Ok(expr)
     }
-    
-    fn parse_condition(&mut self, builder: &mut FilterBuilder) -> Result<(), ParseError> {
-        // Handle NOT operator
-        let negated = if self.position < self.tokens.len() && self.tokens[self.position] == Token::Not {
-            self.position += 1;
-            true
-        } else {
-            false
-        };
-        
-        // Handle parentheses for grouping
-        if self.position < self.tokens.len() && self.tokens[self.position] == Token::LeftParen {
-            self.position += 1;
-            
-            if negated {
-                builder.not_group();
-            }
-            
-            self.parse_expression(builder)?;
-            
-            if self.position >= self.tokens.len() || self.tokens[self.position] != Token::RightParen {
+
+    fn parse_and_expression(&mut self) -> Result<FilterExpression, ParseError> {
+        let mut expr = self.parse_unary_expression()?;
+
+        while self.consume_token(&Token::And) {
+            let right = self.parse_unary_expression()?;
+            expr = self.combine_expressions(LogicalOperator::And, expr, right);
+        }
+
+        Ok(expr)
+    }
+
+    fn parse_unary_expression(&mut self) -> Result<FilterExpression, ParseError> {
+        let negated = self.consume_token(&Token::Not);
+        let mut expr = if self.consume_token(&Token::LeftParen) {
+            let inner = self.parse_or_expression()?;
+
+            if !self.consume_token(&Token::RightParen) {
                 return Err(ParseError::MissingClosingParen);
             }
-            self.position += 1;
-            
-            if negated {
-                builder.end_group();
-            }
-            
-            return Ok(());
-        }
-        
-        // Parse field
-        let field = match &self.tokens.get(self.position) {
-            Some(Token::Field(f)) => {
-                self.position += 1;
-                self.parse_field(f)?
-            }
-            _ => return Err(ParseError::ExpectedField),
+
+            inner
+        } else {
+            self.parse_condition()?
         };
-        
-        // Parse operator (optional colon)
-        if self.position < self.tokens.len() && self.tokens[self.position] == Token::Colon {
-            self.position += 1;
+
+        if negated {
+            expr = self.negate_expression(expr);
         }
-        
-        // Check if the next token is a special value that acts as an operator
-        let (operator, value) = if let Some(Token::Value(val)) = self.tokens.get(self.position) {
-            match val.as_str() {
-                "null" | "empty" => {
-                    self.position += 1;
-                    (FilterOperator::IsNull, FilterValue::Null)
-                }
-                _ => {
-                    // Parse operator
-                    let op = match self.tokens.get(self.position) {
-                        Some(Token::Operator(op)) => {
-                            self.position += 1;
-                            self.parse_operator(op)?
+
+        Ok(expr)
+    }
+
+    fn parse_condition(&mut self) -> Result<FilterExpression, ParseError> {
+        let (field, implicit_operator) = self.parse_field()?;
+
+        if self.consume_token(&Token::Colon) {
+            // optional field separator
+        }
+
+        let operator = if let Some(Token::Operator(op_text)) = self.tokens.get(self.position) {
+            self.position += 1;
+            self.parse_operator(op_text)?
+        } else if let Some(op) = implicit_operator {
+            op
+        } else {
+            FilterOperator::Equals
+        };
+
+        let value = match operator {
+            FilterOperator::IsNull | FilterOperator::IsNotNull => FilterValue::Null,
+            _ => {
+                match self.tokens.get(self.position) {
+                    Some(Token::Value(value)) if self.is_null_value(value) => {
+                        self.position += 1;
+                        match operator {
+                            FilterOperator::Equals => FilterValue::Null,
+                            FilterOperator::NotEquals => FilterValue::Null,
+                            _ => {
+                                return Err(ParseError::InvalidOperatorValueCombination);
+                            }
                         }
-                        _ => FilterOperator::Equals, // Default operator
-                    };
-                    
-                    // Parse value
-                    let val = self.parse_value(&field, &op)?;
-                    (op, val)
+                    }
+                    _ => self.parse_value(&field, &operator)?,
                 }
+            }
+        };
+
+        let operator = if let FilterValue::Null = value {
+            match operator {
+                FilterOperator::Equals => FilterOperator::IsNull,
+                FilterOperator::NotEquals => FilterOperator::IsNotNull,
+                op => op,
             }
         } else {
-            // Parse operator
-            let op = match self.tokens.get(self.position) {
-                Some(Token::Operator(op)) => {
-                    self.position += 1;
-                    self.parse_operator(op)?
-                }
-                _ => FilterOperator::Equals, // Default operator
-            };
-            
-            // Parse value
-            let val = self.parse_value(&field, &op)?;
-            (op, val)
+            operator
         };
-        
-        // Apply the condition using the builder
-        self.apply_condition(builder, field, operator, value, negated)?;
-        
-        Ok(())
+
+        Ok(FilterExpression::Condition(FilterCondition {
+            field,
+            operator,
+            value,
+        }))
     }
-    
-    fn parse_field(&self, field_str: &str) -> Result<FilterField, ParseError> {
+
+    fn parse_field(&mut self) -> Result<(FilterField, Option<FilterOperator>), ParseError> {
+        let token = self
+            .tokens
+            .get(self.position)
+            .ok_or(ParseError::ExpectedField)?;
+
+        let field_str = match token {
+            Token::Field(f) => f.clone(),
+            _ => return Err(ParseError::ExpectedField),
+        };
+
+        self.position += 1;
+
+        let implicit_operator = self.implicit_operator_for_field(&field_str);
+
+        Ok((self.parse_field_name(&field_str)?, implicit_operator))
+    }
+
+    fn implicit_operator_for_field(&self, field_str: &str) -> Option<FilterOperator> {
+        match field_str.to_lowercase().as_str() {
+            "has-label" => Some(FilterOperator::HasAny),
+            "no-label" => Some(FilterOperator::IsNull),
+            "has-assignee" => Some(FilterOperator::IsNotNull),
+            "no-assignee" => Some(FilterOperator::IsNull),
+            _ => None,
+        }
+    }
+
+    fn parse_field_name(&self, field_str: &str) -> Result<FilterField, ParseError> {
         Ok(match field_str.to_lowercase().as_str() {
             "title" => FilterField::Title,
             "description" | "desc" => FilterField::Description,
             "status" | "state" => FilterField::Status,
             "priority" | "p" => FilterField::Priority,
-            "assignee" | "assigned" => FilterField::Assignee,
-            "label" | "labels" | "tag" | "tags" => FilterField::Label,
+            "assignee" | "assigned" | "has-assignee" | "no-assignee" => FilterField::Assignee,
+            "label" | "labels" | "tag" | "tags" | "has-label" | "no-label" => FilterField::Label,
             "project" => FilterField::Project,
             "team" => FilterField::Team,
             "created" | "createdat" | "created_at" => FilterField::CreatedAt,
@@ -427,11 +564,11 @@ impl FilterParser {
             _ => FilterField::Custom(field_str.to_string()),
         })
     }
-    
+
     fn parse_operator(&self, op_str: &str) -> Result<FilterOperator, ParseError> {
         Ok(match op_str {
             "=" | ":" | "is" => FilterOperator::Equals,
-            "!=" | "not" | "isnt" => FilterOperator::NotEquals,
+            "!=" | "not" | "isnt" | "!" => FilterOperator::NotEquals,
             ">" | "gt" => FilterOperator::GreaterThan,
             ">=" | "gte" => FilterOperator::GreaterThanOrEquals,
             "<" | "lt" => FilterOperator::LessThan,
@@ -448,15 +585,8 @@ impl FilterParser {
             _ => return Err(ParseError::UnknownOperator(op_str.to_string())),
         })
     }
-    
+
     fn parse_value(&mut self, field: &FilterField, operator: &FilterOperator) -> Result<FilterValue, ParseError> {
-        // Handle special cases
-        match operator {
-            FilterOperator::IsNull | FilterOperator::IsNotNull => return Ok(FilterValue::Null),
-            _ => {}
-        }
-        
-        // Parse value token
         let value_str = match self.tokens.get(self.position) {
             Some(Token::Value(v)) => {
                 self.position += 1;
@@ -464,15 +594,14 @@ impl FilterParser {
             }
             _ => return Err(ParseError::ExpectedValue),
         };
-        
-        // Convert based on field type
+
+        let value_str = value_str.trim().to_string();
+
         match field {
             FilterField::Priority => {
-                // Try to parse as number
                 if let Ok(n) = value_str.parse::<u8>() {
                     Ok(FilterValue::Number(n as f64))
                 } else {
-                    // Convert priority names to numbers
                     match value_str.to_lowercase().as_str() {
                         "none" | "no" => Ok(FilterValue::Number(0.0)),
                         "low" => Ok(FilterValue::Number(1.0)),
@@ -484,31 +613,34 @@ impl FilterParser {
                 }
             }
             FilterField::CreatedAt | FilterField::UpdatedAt | FilterField::DueDate => {
-                // Try to parse relative date
                 if let Some(date) = parse_relative_date(&value_str) {
                     Ok(FilterValue::Date(date))
                 } else {
-                    // Assume it's an absolute date
                     Ok(FilterValue::Date(value_str))
                 }
             }
-            _ => {
-                // Handle list values for IN operators
-                if matches!(operator, FilterOperator::In | FilterOperator::NotIn) {
-                    let mut values = vec![value_str];
-                    
-                    // Parse additional comma-separated values
+        _ => {
+                if matches!(
+                    operator,
+                    FilterOperator::In | FilterOperator::NotIn | FilterOperator::HasAny | FilterOperator::HasNone
+                ) {
+                    let mut values: Vec<String> = value_str
+                        .split(',')
+                        .filter(|s| !s.is_empty())
+                        .map(|v| v.to_string())
+                        .collect();
+
                     while self.position < self.tokens.len() && self.tokens[self.position] == Token::Comma {
                         self.position += 1;
                         match self.tokens.get(self.position) {
                             Some(Token::Value(v)) => {
                                 self.position += 1;
-                                values.push(v.clone());
+                                values.push(v.to_string());
                             }
-                            _ => break,
+                            _ => return Err(ParseError::ExpectedValue),
                         }
                     }
-                    
+
                     Ok(FilterValue::StringList(values))
                 } else {
                     Ok(FilterValue::String(value_str))
@@ -516,55 +648,79 @@ impl FilterParser {
             }
         }
     }
-    
-    fn apply_condition(
-        &self,
-        builder: &mut FilterBuilder,
-        field: FilterField,
-        operator: FilterOperator,
-        value: FilterValue,
-        negated: bool,
-    ) -> Result<(), ParseError> {
-        // Get field builder
-        let field_builder = builder.field(field);
-        
-        // Apply operator with potential negation
-        let effective_operator = if negated {
-            match operator {
-                FilterOperator::Equals => FilterOperator::NotEquals,
-                FilterOperator::NotEquals => FilterOperator::Equals,
-                FilterOperator::Contains => FilterOperator::NotContains,
-                FilterOperator::NotContains => FilterOperator::Contains,
-                FilterOperator::IsNull => FilterOperator::IsNotNull,
-                FilterOperator::IsNotNull => FilterOperator::IsNull,
-                FilterOperator::In => FilterOperator::NotIn,
-                FilterOperator::NotIn => FilterOperator::In,
-                _ => operator, // Some operators don't have direct negations
-            }
+
+    fn consume_token(&mut self, token: &Token) -> bool {
+        if self.tokens.get(self.position) == Some(token) {
+            self.position += 1;
+            true
         } else {
-            operator
-        };
-        
-        // Apply the condition based on operator
-        match (effective_operator, value) {
-            (FilterOperator::Equals, v) => { field_builder.equals(v); }
-            (FilterOperator::NotEquals, v) => { field_builder.not_equals(v); }
-            (FilterOperator::GreaterThan, v) => { field_builder.greater_than(v); }
-            (FilterOperator::GreaterThanOrEquals, v) => { field_builder.greater_than_or_equals(v); }
-            (FilterOperator::LessThan, v) => { field_builder.less_than(v); }
-            (FilterOperator::LessThanOrEquals, v) => { field_builder.less_than_or_equals(v); }
-            (FilterOperator::Contains, FilterValue::String(s)) => { field_builder.contains(s); }
-            (FilterOperator::NotContains, FilterValue::String(s)) => { field_builder.not_contains(s); }
-            (FilterOperator::StartsWith, FilterValue::String(s)) => { field_builder.starts_with(s); }
-            (FilterOperator::EndsWith, FilterValue::String(s)) => { field_builder.ends_with(s); }
-            (FilterOperator::In, FilterValue::StringList(list)) => { field_builder.in_list(list); }
-            (FilterOperator::NotIn, FilterValue::StringList(list)) => { field_builder.not_in_list(list); }
-            (FilterOperator::IsNull, _) => { field_builder.is_null(); }
-            (FilterOperator::IsNotNull, _) => { field_builder.is_not_null(); }
-            _ => return Err(ParseError::InvalidOperatorValueCombination),
+            false
         }
-        
-        Ok(())
+    }
+
+    fn combine_expressions(
+        &self,
+        operator: LogicalOperator,
+        left: FilterExpression,
+        right: FilterExpression,
+    ) -> FilterExpression {
+        let mut conditions = Vec::new();
+
+        match left {
+            FilterExpression::Group(group) if group.operator == operator => {
+                conditions.extend(group.conditions.into_iter());
+            }
+            other => conditions.push(other),
+        }
+
+        match right {
+            FilterExpression::Group(group) if group.operator == operator => {
+                conditions.extend(group.conditions.into_iter());
+            }
+            other => conditions.push(other),
+        }
+
+        FilterExpression::Group(Box::new(FilterGroup {
+            operator,
+            conditions,
+        }))
+    }
+
+    fn negate_expression(&self, expr: FilterExpression) -> FilterExpression {
+        match expr {
+            FilterExpression::Condition(condition) => {
+                let operator = self.negate_operator(condition.operator);
+                FilterExpression::Condition(FilterCondition {
+                    field: condition.field,
+                    operator,
+                    value: condition.value,
+                })
+            }
+            FilterExpression::Group(group) => {
+                FilterExpression::Group(Box::new(FilterGroup {
+                    operator: LogicalOperator::Not,
+                    conditions: vec![FilterExpression::Group(group)],
+                }))
+            }
+        }
+    }
+
+    fn negate_operator(&self, operator: FilterOperator) -> FilterOperator {
+        match operator {
+            FilterOperator::Equals => FilterOperator::NotEquals,
+            FilterOperator::NotEquals => FilterOperator::Equals,
+            FilterOperator::Contains => FilterOperator::NotContains,
+            FilterOperator::NotContains => FilterOperator::Contains,
+            FilterOperator::IsNull => FilterOperator::IsNotNull,
+            FilterOperator::IsNotNull => FilterOperator::IsNull,
+            FilterOperator::In => FilterOperator::NotIn,
+            FilterOperator::NotIn => FilterOperator::In,
+            _ => operator,
+        }
+    }
+
+    fn is_null_value(&self, value: &str) -> bool {
+        matches!(value.to_lowercase().as_str(), "null" | "empty")
     }
 }
 
@@ -574,19 +730,19 @@ fn parse_relative_date(input: &str) -> Option<String> {
     if let Some(captures) = re.captures(input) {
         let amount = captures[1].parse::<i64>().ok()?;
         let unit = captures[2].to_lowercase();
-        
+
         let duration = match unit.as_str() {
             "h" => Duration::hours(amount),
             "d" => Duration::days(amount),
             "w" => Duration::weeks(amount),
-            "m" => Duration::days(amount * 30), // Approximation
+            "m" => Duration::days(amount * 30),
             _ => return None,
         };
-        
+
         let date = Utc::now() - duration;
         return Some(date.to_rfc3339());
     }
-    
+
     None
 }
 
@@ -595,25 +751,31 @@ fn parse_relative_date(input: &str) -> Option<String> {
 pub enum ParseError {
     #[error("Unexpected character at position {position}: '{char}'")]
     UnexpectedCharacter { position: usize, char: char },
-    
+
     #[error("Unexpected token at position {position}: {token}")]
     UnexpectedToken { token: String, position: usize },
-    
+
+    #[error("Unexpected end of input")]
+    UnexpectedEndOfInput,
+
+    #[error("Unterminated quoted string at position {position}")]
+    UnterminatedString { position: usize },
+
     #[error("Expected field name")]
     ExpectedField,
-    
+
     #[error("Expected value")]
     ExpectedValue,
-    
+
     #[error("Unknown operator: {0}")]
     UnknownOperator(String),
-    
+
     #[error("Invalid priority value: {0}")]
     InvalidPriorityValue(String),
-    
+
     #[error("Missing closing parenthesis")]
     MissingClosingParen,
-    
+
     #[error("Invalid operator/value combination")]
     InvalidOperatorValueCombination,
 }
@@ -627,56 +789,98 @@ pub fn parse_filter(query: &str) -> Result<FilterBuilder, ParseError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_simple_filter() {
         let builder = parse_filter("status:completed").unwrap();
-        // Test would verify the builder structure
+        assert!(matches!(builder.to_graphql(), Ok(_)));
     }
-    
+
     #[test]
     fn test_compound_filter() {
         let builder = parse_filter("status!=completed AND priority>2").unwrap();
-        // Test would verify the builder structure
+        assert!(matches!(builder.to_graphql(), Ok(_)));
     }
-    
+
     #[test]
     fn test_relative_dates() {
         let builder = parse_filter("created>7d AND updated<2w").unwrap();
-        // Test would verify the builder structure
+        assert!(matches!(builder.to_graphql(), Ok(_)));
     }
-    
+
     #[test]
     fn test_quoted_values() {
         let builder = parse_filter(r#"title~"bug fix" AND assignee="john@example.com""#).unwrap();
-        // Test would verify the builder structure
+        assert!(matches!(builder.to_graphql(), Ok(_)));
     }
-    
+
     #[test]
     fn test_list_values() {
         let builder = parse_filter("status in:backlog,unstarted,started").unwrap();
-        // Test would verify the builder structure
+        assert!(matches!(builder.to_graphql(), Ok(_)));
     }
-    
+
+    #[test]
+    fn test_legacy_has_label_filter() {
+        let builder = parse_filter("has-label:urgent").unwrap();
+        let graphql = builder.to_graphql().unwrap();
+
+        assert!(graphql.get("labels").is_some());
+        let labels = graphql.get("labels").unwrap();
+        assert!(labels.get("some").is_some() || labels.get("every").is_some());
+    }
+
+    #[test]
+    fn test_legacy_no_assignee_filter() {
+        let builder = parse_filter("no-assignee").unwrap();
+        let graphql = builder.to_graphql().unwrap();
+
+        let assignee = graphql.get("assignee").unwrap();
+        assert_eq!(assignee["null"], true);
+    }
+
+    #[test]
+    fn test_legacy_no_label_filter() {
+        let builder = parse_filter("no-label").unwrap();
+        let graphql = builder.to_graphql().unwrap();
+
+        let labels = graphql.get("labels").unwrap();
+        assert!(labels.get("every").is_some());
+    }
+
     #[test]
     fn test_negation() {
         let builder = parse_filter("NOT status:completed").unwrap();
-        // Test would verify the builder structure
+        assert!(matches!(builder.to_graphql(), Ok(_)));
     }
-    
+
     #[test]
     fn test_parentheses() {
-        let builder = parse_filter("(priority>2 OR urgent) AND NOT status:completed").unwrap();
-        // Test would verify the builder structure
+        let builder = parse_filter("(priority>2 OR label:urgent) AND NOT status:completed").unwrap();
+        assert!(matches!(builder.to_graphql(), Ok(_)));
     }
-    
+
+    #[test]
+    fn test_and_or_precedence() {
+        let builder = parse_filter("status:done OR priority>2 AND assignee:john").unwrap();
+        let graphql = builder.to_graphql().unwrap();
+        let graphql_string = graphql.to_string();
+        assert!(graphql_string.contains("\"or\""));
+    }
+
+    #[test]
+    fn test_utf8_tokenization_in_values() {
+        let mut tokenizer = Tokenizer::new("title~\"bug 🐛\" assignee:jose@example.com");
+        let tokens = tokenizer.tokenize().unwrap();
+        assert!(matches!(&tokens[0], Token::Field(field) if field == "title"));
+        assert!(matches!(&tokens[1], Token::Operator(op) if op == "~"));
+        assert!(matches!(&tokens[2], Token::Value(value) if value == "bug 🐛"));
+    }
+
     #[test]
     fn test_tokenizer_in_operator() {
         let mut tokenizer = Tokenizer::new("status in:backlog,unstarted");
         let tokens = tokenizer.tokenize().unwrap();
-        println!("Tokens: {:?}", tokens);
-        
-        // We expect: [Field("status"), Operator("in"), Value("backlog,unstarted")]
         assert_eq!(tokens.len(), 3);
         assert!(matches!(&tokens[0], Token::Field(f) if f == "status"));
         assert!(matches!(&tokens[1], Token::Operator(op) if op == "in"));

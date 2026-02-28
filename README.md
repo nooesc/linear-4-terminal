@@ -1,597 +1,168 @@
-# Linear CLI - Command Line Interface for Linear.app
+# Linear 4 Terminal
 
-A fast, powerful terminal client for Linear project management. Access Linear's GraphQL API directly from your command line to manage issues, projects, and teams without leaving your terminal. Built with Rust for speed and reliability.
+A Rust-based terminal client for Linear.app.
 
-**Perfect for developers who want to:**
-- Create and update Linear issues without switching to a browser
-- Automate Linear workflows with scripts  
-- Perform bulk operations on issues and projects
-- Stay in the terminal while managing project tasks
+Use it to read, create, and update issues, projects, and comments without opening the web app. Includes a fullscreen interactive mode for fast terminal workflows.
 
-![Linear CLI Demo](assets/linear-cli-demo.png)
-
-## Why Use Linear CLI?
-
-- **Speed**: No browser needed - manage Linear issues at terminal speed
-- **Automation**: Script your workflows and integrate with other tools
-- **Focus**: Stay in your development environment without context switching
-- **Power**: Bulk operations and advanced filtering not available in the web UI
-
-## Key Features
-
-✅ **Full Linear API Access**: Create, read, update, and delete issues and projects  
-✅ **Advanced Search & Filtering**: Powerful query language with field operators and saved searches  
-✅ **Bulk Operations**: Update, move, or archive multiple issues at once  
-✅ **Comments Management**: Full CRUD operations on issue comments with markdown support  
-✅ **Smart Filtering**: Filter by status, assignee, team, priority, or search text  
-✅ **Beautiful Output**: Color-coded terminal display with dynamic responsive layout  
-✅ **Multiple Formats**: Export to JSON, table view, or simple text  
-✅ **Secure Authentication**: API key management with environment variables  
-✅ **Cross-platform**: Works on macOS, Linux, and Windows (WSL)  
-✅ **Blazing Fast**: Built with Rust for instant response times, parallel API calls  
-✅ **Interactive Mode**: Feature-rich TUI with quick actions, link navigation, and smart editing
-
-## Interactive Mode (NEW!)
-
-Launch a powerful interactive terminal UI for managing Linear issues:
-
-```bash
-linear interactive  # or just 'linear' without arguments
-```
-
-### Interactive Mode Features:
-
-#### Navigation & Display
-- **Real-time Navigation**: Use arrow keys or j/k to browse issues
-- **Colorful Display**: Issues are color-coded by status and priority
-- **Priority Indicators**: Visual symbols (◦ • ■ ▲) for priority levels
-- **Responsive Layout**: Automatically adjusts columns based on terminal width
-- **Issue Age**: Shows time since creation (3d, 1w, 2h, etc.)
-- **Smart Truncation**: Optimized title display with full text in header
-
-#### Quick Actions
-- **Quick Search**: Press `/` to search issues by title or ID
-- **Quick Edit**: Direct shortcuts from the main table:
-  - `s` - Change issue status
-  - `c` - Add a comment
-  - `l` - Edit labels
-  - `p` - Change project assignment
-  - `e` - Full edit menu
-- **Quick Open**: Press `o` to open issue in browser
-- **Smart Return**: After quick edits, returns you to the main table (not detail view)
-
-#### Issue Details View
-- **Full Information**: Complete issue details including description
-- **Links Section**: Automatically extracts and displays links from descriptions
-- **Link Navigation**: Press `l` to navigate links with j/k, Enter to open
-- **Quick Link Access**: Number keys (0-9) for instant link opening
-- **Scrollable Content**: Long link lists scroll with position indicators
-
-#### Grouping & Organization
-- **Group Toggle**: Press `g` to switch between status and project grouping
-- **Visual Grouping**: Issues sorted by group with clear visual separation
-- **Project/Label Display**: Separate columns with distinct colors
-
-#### Edit Capabilities
-- **Title & Description**: Edit issue text fields
-- **Status Selection**: Visual menu with current status highlighted
-- **Priority Selection**: Choose from None/Low/Medium/High/Urgent
-- **Label Management**: Multi-select labels with checkboxes
-- **Project Assignment**: Select project or remove assignment
-- **Assignee**: Update issue assignee (coming soon)
-- **External Editor**: Ctrl+E for description editing in your preferred editor
-
-### Complete Keyboard Shortcuts:
-- **Navigation**:
-  - `j/k` or ↓/↑ - Navigate up/down
-  - `Enter` - View issue details
-  - `Esc` or `q` - Go back/Quit
-  
-- **Quick Actions**:
-  - `s` - Quick status change
-  - `c` - Quick comment
-  - `l` - Quick label edit
-  - `p` - Quick project edit
-  - `e` - Full edit menu
-  - `o` - Open in Linear (browser)
-  
-- **Search & Filter**:
-  - `/` - Search mode
-  - `g` - Toggle grouping (status/project)
-  - `r` - Refresh issues
-  
-- **In Detail View**:
-  - `l` - Enter links navigation mode
-  - `0-9` - Quick open numbered link
-  - All quick edit shortcuts work here too
-
-## Future Plans & Roadmap
-
-We're actively working on expanding the Linear CLI with powerful new features. Here's what's coming:
-
-### 🚧 Recently Completed (v2)
-- ✅ **Comments Management**: Full CRUD operations for issue comments
-- ✅ **Bulk Operations**: Batch update, move, and archive issues
-- ✅ **Advanced Search**: Query language with operators and saved searches
-- ✅ **Git Integration**: Create commits, branches, and PRs linked to Linear issues
-- ✅ **Enhanced Interactive Mode**: 
-  - Quick edit shortcuts (status, comment, labels, project)
-  - Link extraction and navigation from issue descriptions
-  - Responsive column layout with smart width calculation
-  - Priority indicators and color coding
-  - Issue age display
-  - Project editing capability
-  - Smart navigation that returns to original context
-- ✅ **Performance Optimization**: 3x faster startup with parallel API calls
-
-### 📋 Planned Features (Priority Order)
-
-#### Medium Priority
-1. **Sprint/Cycle Management**
-   - Create and manage sprints/cycles
-   - Sprint planning and burndown charts
-   - Add/remove issues from sprints
-   - Sprint progress tracking
-
-2. **Issue Dependencies & Relationships**
-   - Link related issues, blockers, and dependencies
-   - Visualize dependency chains
-   - Block/unblock workflows
-
-3. **Time Tracking & Estimates**
-   - Log time on issues
-   - Set and track estimates
-   - Time reports and summaries
-   - Velocity calculations
-
-4. **Advanced Reporting**
-   - Daily/weekly standup reports
-   - Team workload analysis
-   - Progress tracking dashboards
-   - Custom report generation
-
-#### Low Priority
-5. **Shell Completion**
-   - Bash, Zsh, Fish completions
-   - Context-aware suggestions
-   - Command aliases
-
-6. **Offline Mode**
-   - Queue changes when offline
-   - Automatic sync on reconnection
-   - Conflict resolution
-
-### 🎯 Long-term Vision
-
-- **Plugin System**: Extend functionality with custom plugins
-- **Webhook Integration**: React to Linear events
-- **AI Assistant**: Natural language commands
-- **Mobile Companion**: CLI commands from mobile
-- **Team Analytics**: Advanced metrics and insights
-
-Want to contribute? Check the features above and submit a PR!
+![Linear 4 Terminal](assets/picture.png)
 
 ## Installation
 
-### macOS/Linux via Direct Download (Recommended)
+### Direct install (recommended)
+
 ```bash
 curl -sSL https://raw.githubusercontent.com/colerafiz/linear-4-terminal/main/install.sh | bash
 ```
 
-### Build from Source
-```bash
-# Install from GitHub
-cargo install --git https://github.com/colerafiz/linear-4-terminal
+### Install from source
 
-# Or clone and build locally
+```bash
+cargo install --git https://github.com/colerafiz/linear-4-terminal
+```
+
+Or:
+
+```bash
 git clone https://github.com/colerafiz/linear-4-terminal
 cd linear-4-terminal
 cargo install --path .
 ```
 
-### Homebrew (Coming Soon)
+## Authentication
+
+Linear CLI expects a Linear API key.
+
 ```bash
-# Once the tap is set up:
-brew tap colerafiz/tap
-brew install linear-cli
+linear auth YOUR_LINEAR_API_KEY
+# optional: also available via env var
+export LINEAR_API_KEY=YOUR_LINEAR_API_KEY
 ```
 
-### Prerequisites
-- For direct download: No prerequisites needed
-- For building from source: Rust and Cargo ([Install Rust](https://rustup.rs/))
-- Linear API key ([Get your API key](https://linear.app/settings/api))
+## Verify setup
 
-## Configuration
-
-### Set up Authentication
-
-1. **Get your Linear API key:**
-   - Go to [Linear Settings > API](https://linear.app/settings/api)
-   - Create a new personal API key
-   - Copy the key
-
-2. **Configure the CLI:**
-```bash
-# Method 1: Use the auth command
-linear auth --api-key lin_api_your_key_here
-
-# Method 2: Set environment variable
-export LINEAR_API_KEY=lin_api_your_key_here
-```
-
-3. **Verify authentication:**
 ```bash
 linear whoami
 linear auth --show
 ```
 
-## Quick Start - Linear Terminal Commands
-
-Get started in 30 seconds:
+## Quick usage
 
 ```bash
-# 1. Install
-curl -sSL https://raw.githubusercontent.com/coderafiz/linear-4-terminal/main/install.sh | bash
-
-# 2. Authenticate with your Linear API key
-linear auth --api-key YOUR_LINEAR_API_KEY
-
-# 3. Start using Linear from your terminal!
 linear issues --mine
-```
-
-## Usage - Complete Linear CLI Reference
-
-### Authentication Commands
-
-```bash
-# Set API key
-linear auth --api-key lin_api_your_key_here
-
-# Show current API key (masked)
-linear auth --show
-```
-
-### Issue Commands
-
-#### List Issues
-```bash
-# List all issues (default: 50 most recent)
-linear issues
-
-# Filter by status
-linear issues --todo           # Todo/Backlog issues
-linear issues --triage         # Issues in triage
-linear issues --progress       # Issues in progress
-linear issues --done           # Completed issues
-
-# Filter by assignee
-linear issues --mine           # Issues assigned to you
-linear issues --assignee user@example.com
-
-# Filter by team
-linear issues --team ENG       # Issues from ENG team
-
-# Search issues
-linear issues --search "bug"   # Search in titles
-
-# Combine filters
-linear issues --mine --progress --team ENG
-
-# Limit results and format output
-linear issues --limit 10 --format table
-linear issues --format json > issues.json
-```
-
-#### Create Issues
-```bash
-# Basic issue creation
-linear create issue "Fix login bug" "Users can't log in"
-
-# With additional parameters
-linear create issue "New feature" "Implement dark mode" \
-  --team ENG \
-  --priority high \
-  --assignee user_id_here \
-  --labels label_id_1 label_id_2
-
-# Priority levels: none/0, low/1, medium/2, high/3, urgent/4
-linear create issue "Urgent fix" "Critical bug" --priority urgent
-```
-
-#### Update Issues
-```bash
-# Update issue title
-linear update issue issue_id --title "New title"
-
-# Update multiple fields
-linear update issue issue_id \
-  --title "Updated title" \
-  --description "New description" \
-  --priority high \
-  --state state_id
-
-# Change assignee
-linear update issue issue_id --assignee user_id
-
-# Update labels
-linear update issue issue_id --labels label_id_1 label_id_2
-```
-
-#### Delete Issues
-```bash
-# Archive an issue
-linear delete issue issue_id
-```
-
-### Project Commands
-
-#### List Projects
-```bash
-# List all projects
+linear issues --progress --team ENG --format table
+linear create issue "Fix login bug" "Users can't log in" --team ENG --priority high
+linear issue INF-36
 linear projects
-```
-
-#### Create Projects
-```bash
-# Basic project creation
-linear create project "Q4 Initiative" "Major improvements for Q4"
-
-# With teams
-linear create project "Mobile App" "iOS and Android apps" \
-  --teams team_id_1 team_id_2
-```
-
-#### Update Projects
-```bash
-# Update project name
-linear update project project_id --name "New name"
-
-# Update multiple fields
-linear update project project_id \
-  --name "Updated project" \
-  --description "New description" \
-  --state "backlog"
-```
-
-#### Delete Projects
-```bash
-# Archive a project
-linear delete project project_id
-```
-
-### Team Commands
-
-```bash
-# List all teams
 linear teams
 ```
 
-### User Commands
+## Commands
+
+### Issues
 
 ```bash
-# Show current user info
-linear whoami
-```
-
-### Advanced Search and Filtering (v2)
-
-```bash
-# Use advanced filter queries
-linear issues -f "assignee:john@example.com AND priority:>2"
-linear issues -f "title:~bug AND created:>1week"
-linear issues -f "has-label:urgent AND state:started"
-linear issues -f "no-assignee AND updated:<2days"
-
-# Available operators
-# : (equals), :> (greater than), :< (less than)
-# :~ (contains), :!= (not equals), :in (in list)
-# Special: has-assignee, no-assignee, has-label:name, no-label
-
-# Save frequently used searches
-linear search save high-priority "priority:>2 AND state:started"
-linear search save my-urgent "assignee:me AND priority:urgent"
-linear search save recent-bugs "title:~bug AND created:<1week"
-
-# List saved searches
-linear search list
-
-# Run a saved search
-linear search run high-priority
-linear search run my-urgent --format table
-
-# Delete a saved search
-linear search delete high-priority
-```
-
-### Comments Management (v2)
-
-```bash
-# List all comments on an issue
-linear comment list INF-36
-
-# Add a comment to an issue
-linear comment add INF-36 "This is looking good, just needs tests"
-
-# Update an existing comment
-linear comment update comment_id "Updated comment text"
-
-# Delete a comment
-linear comment delete comment_id
-```
-
-### Bulk Operations (v2)
-
-```bash
-# Update multiple issues at once
-linear bulk update INF-1,INF-2,INF-3 --state done
-linear bulk update INF-4 INF-5 --assignee john@example.com --priority high
-
-# Move multiple issues to a different team/project
-linear bulk move INF-10,INF-11,INF-12 --team ENG
-linear bulk move INF-20 INF-21 --project project_id
-
-# Archive multiple issues
-linear bulk archive INF-30,INF-31,INF-32
-
-# Update with labels
-linear bulk update INF-40,INF-41 --labels label1,label2 --remove-labels old_label
-```
-
-### Git Integration (v2)
-
-The Linear CLI provides seamless Git integration to link your commits, branches, and pull requests with Linear issues.
-
-#### Create Branches from Issues
-
-```bash
-# Create a feature branch from a Linear issue
-linear git branch INF-36
-# Creates: feature/inf-36-fix-authentication-bug
-
-# Use a different branch prefix
-linear git branch INF-36 --prefix bugfix
-# Creates: bugfix/inf-36-fix-authentication-bug
-```
-
-#### Commit with Issue References
-
-```bash
-# Commit with explicit issue reference
-linear git commit "Fix null pointer exception" --issue INF-36
-# Creates commit: "INF-36: Fix null pointer exception"
-
-# Auto-detect issue from commit message
-linear git commit "Fix issue with INF-36 authentication"
-# Issue ID is automatically detected
-
-# Commit and push in one command
-linear git commit "Add user validation" --issue INF-36 --push
-
-# Update Linear issue status after commit
-linear git commit "Implement login flow" --issue INF-36 --update-status --status "In Progress"
-```
-
-#### Create Pull Requests
-
-```bash
-# Create a PR linked to the Linear issue (auto-detects from branch name)
-linear git pr
-
-# Custom PR title and body
-linear git pr --title "Fix: Authentication flow" --body "Resolves login issues"
-
-# Create as draft
-linear git pr --draft
-
-# Open in browser after creation
-linear git pr --web
-```
-
-#### Git Hooks Integration
-
-Set up a commit-msg hook to automatically update Linear issues based on commit messages:
-
-```bash
-# Create the hook file
-cat > .git/hooks/commit-msg << 'EOF'
-#!/bin/sh
-linear git hook < $1
-EOF
-
-# Make it executable
-chmod +x .git/hooks/commit-msg
-```
-
-Now your commits will automatically update Linear issues:
-- Commits with "fixes", "closes", or "resolves" will mark issues as Done
-- Commits with "wip" or "in progress" will mark issues as In Progress
-
-### View Single Issue Details
-
-```bash
-# Get comprehensive details about a specific issue
+linear issues                     # latest issues
+linear issues --todo
+linear issues --progress
+linear issues --done
+linear issues --mine
+linear issues --assignee user@example.com
+linear issues --search "error"
+linear issues --team ENG --limit 25
+linear issues -f "assignee:me AND priority:>2"
+linear issues --format json
 linear issue INF-36
 ```
 
-## Output Formats
+### Create / update / archive issues
 
-The CLI supports multiple output formats:
-
-### Simple Format (Default)
 ```bash
-linear issues
-# • issue-id - Issue Title (Status)
+linear create issue "Title" "Description" --team ENG --priority high
+linear update issue INF-36 --title "Updated title" --description "Updated description"
+linear update issue INF-36 --state 4 --assignee user_id_here
+linear update issue INF-36 --labels label_id_1 label_id_2
+linear delete issue INF-36
 ```
 
-### Table Format
+### Projects and teams
+
+```bash
+linear projects
+linear create project "Project name" "Description" --teams team_id_1
+linear update project PROJECT_ID --name "New name"
+linear delete project PROJECT_ID
+linear teams
+```
+
+### Comments
+
+```bash
+linear comment list INF-36
+linear comment add INF-36 "Looks good, merging today"
+linear comment update COMMENT_ID "Updated text"
+linear comment delete COMMENT_ID
+```
+
+### Search helpers
+
+```bash
+linear search save urgent "priority:urgent AND state:started"
+linear search list
+linear search run urgent
+linear search delete urgent
+```
+
+### Bulk actions
+
+```bash
+linear bulk update INF-1,INF-2 --state done
+linear bulk move INF-3,INF-4 --team ENG
+linear bulk archive INF-5,INF-6
+linear bulk update INF-7,INF-8 --labels label1,label2 --remove-labels old_label
+```
+
+### Git integration
+
+```bash
+linear git branch INF-36
+linear git branch INF-36 --prefix bugfix
+linear git commit "Fix null pointer exception" --issue INF-36
+linear git commit "Implement retry logic" --push
+linear git pr
+linear git pr --title "Fix: auth flow" --body "Resolves login flow bugs"
+```
+
+## Interactive mode
+
+Run interactive mode with no arguments:
+
+```bash
+linear
+# or
+linear interactive
+```
+
+Shortcuts:
+- `j/k`, `↑/↓` navigate the list
+- `Enter` open issue details
+- `/` filter by text
+- `s` status, `c` comment, `l` labels, `p` project
+- `e` full edit mode, `r` refresh, `g` toggle grouping
+- `q` or `Esc` to quit
+
+## Output formats
+
 ```bash
 linear issues --format table
-# ID                   Title                        State     Team    Assignee
-# -------------------------------------------------------------------------
-# abc123              Fix login bug                Todo      ENG     John Doe
-```
-
-### JSON Format
-```bash
 linear issues --format json
-# Full JSON output with all issue data
+linear issues --format simple
 ```
 
-## Examples
+## Configuration file
 
-### Common Linear Terminal Workflows
+`~/.linear-cli-config.json` stores defaults such as API key and team configuration.
 
-```bash
-# Check your assigned issues
-linear issues --mine
-
-# Check what's in triage for your team
-linear issues --triage --team ENG
-
-# Create a bug report
-linear create issue "Login button not working" \
-  "The login button doesn't respond on mobile devices" \
-  --team ENG --priority high
-
-# Check team progress
-linear issues --progress --team ENG --format table
-
-# Search for specific issues
-linear issues --search "authentication" --format table
-```
-
-### Project Management Examples
-
-```bash
-# Review all projects
-linear projects
-
-# Create a new project
-linear create project "Website Redesign" \
-  "Complete overhaul of company website" \
-  --teams design_team_id eng_team_id
-
-# Check issues for a specific project
-linear issues --search "website"
-```
-
-### Reporting Examples
-
-```bash
-# Generate JSON report of all completed issues
-linear issues --done --format json > completed_issues.json
-
-# Get table view of current sprint
-linear issues --progress --format table
-
-# Export team's backlog
-linear issues --backlog --team ENG --limit 100 --format json > backlog.json
-```
-
-## Configuration File
-
-The CLI stores configuration in `~/.linear-cli-config.json`:
+### Example
 
 ```json
 {
@@ -600,151 +171,55 @@ The CLI stores configuration in `~/.linear-cli-config.json`:
 }
 ```
 
-## Error Handling
-
-The CLI provides helpful error messages:
+## Environment variables
 
 ```bash
-# No API key configured
-$ linear issues
-Error: No API key found. Set LINEAR_API_KEY environment variable or run 'linear auth' to configure.
-
-# Invalid team
-$ linear create issue "Test" --team INVALID
-Error: Team 'INVALID' not found
-
-# GraphQL errors are displayed clearly
-$ linear create issue ""
-Error: GraphQL errors: Issue title cannot be empty
-```
-
-## Advanced Features
-
-### Environment Variables
-
-```bash
-# Set API key via environment
 export LINEAR_API_KEY=lin_api_your_key_here
-
-# Override default team
 export LINEAR_DEFAULT_TEAM=ENG
 ```
 
-### Scripting Examples
-
-```bash
-#!/bin/bash
-# Daily standup script
-
-echo "=== My Issues in Progress ==="
-linear issues --mine --progress --format table
-
-echo -e "\n=== Triage Items for My Team ==="
-linear issues --triage --team ENG --format table
-
-echo -e "\n=== Recently Completed ==="
-linear issues --mine --done --limit 5
-```
-
-```bash
-#!/bin/bash
-# Create issue from git commit
-COMMIT_MSG=$(git log -1 --pretty=%B)
-BRANCH_NAME=$(git branch --show-current)
-
-linear create issue "Fix: $BRANCH_NAME" "$COMMIT_MSG" \
-  --team ENG --priority medium
-```
-
-## API Coverage
-
-This CLI covers the major Linear API operations:
-
-### Queries
-- ✅ Get viewer information
-- ✅ List issues with filtering
-- ✅ List teams
-- ✅ List projects
-- ✅ Search functionality
-- ✅ View single issue details
-- ✅ List comments on issues
-
-### Mutations
-- ✅ Create issues
-- ✅ Create projects
-- ✅ Update issues
-- ✅ Update projects
-- ✅ Delete operations (archive)
-- ✅ Create comments
-- ✅ Update comments
-- ✅ Delete comments
-- ✅ Bulk update issues
-- ✅ Bulk move issues
-- ✅ Bulk archive issues
-
-### Filters & Search
-- ✅ State-based filtering (todo, triage, progress, done)
-- ✅ Assignee filtering
-- ✅ Team filtering
-- ✅ Search/text filtering
-- ✅ Pagination with limits
-- ✅ Advanced query language with operators
-- ✅ Field-specific filters (priority, created, updated, labels)
-- ✅ Relative date filtering
-- ✅ Saved searches
-
 ## Troubleshooting
 
-### Common Issues
+### Missing API key
 
-1. **Authentication Errors**
-   ```bash
-   # Verify your API key
-   linear auth --show
-   linear whoami
-   ```
+```bash
+linear issues
+# No API key found...
+linear auth YOUR_KEY
+```
 
-2. **Team Not Found**
-   ```bash
-   # List available teams first
-   linear teams
-   ```
+### Team or ID not found
 
-3. **Rate Limiting**
-   The CLI respects Linear's rate limits. If you hit limits, wait a moment and try again.
+```bash
+linear teams
+linear projects
+```
 
-4. **Network Issues**
-   ```bash
-   # Check connectivity to Linear's API
-   curl -I https://api.linear.app/graphql
-   ```
+### API/JSON output errors
 
-### Debug Mode
+Add JSON debugging while developing:
 
-For debugging, you can inspect the API calls by modifying the code to add debug logging or use tools like `RUST_LOG=debug cargo run`.
+```bash
+RUST_LOG=debug cargo run -- issues
+```
 
+## Development
+
+```bash
+cargo build
+cargo build --release
+cargo run -- interactive
+cargo test
+```
 
 ## Contributing
 
-Contributions are welcome! Check our roadmap near the top of this README to see what we're working on.
+Open issues or submit pull requests in this repository.
 
-Ways to contribute:
-- Pick a feature from the roadmap
-- Report bugs or suggest features in [issues](https://github.com/colerafiz/linear-4-terminal/issues)
-- Improve documentation
-- Add tests
-- Share feedback and use cases
-
-## Related Projects and Alternatives
-
-- **Linear Web App**: The official Linear.app web interface
-- **Linear API**: Direct GraphQL API access for custom integrations
-- **Linear CLI**: This terminal-based Linear client for developers
-
-## Keywords for Search
-
-Linear CLI, Linear terminal, Linear command line, Linear.app CLI, Linear API client, terminal Linear app, command line project management, Linear issue tracker terminal, Linear GraphQL client, Rust Linear integration
+- Keep command behavior stable unless documented
+- Add tests for command handling and parsing changes
+- Prefer direct, deterministic output in scripts when adding format variants
 
 ## License
 
-MIT License - free to use and modify for your Linear workflow automation needs.
+MIT License.
