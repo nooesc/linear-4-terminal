@@ -1,7 +1,9 @@
 pub mod app;
+pub mod event;
+pub mod handlers;
+pub mod keys;
 pub mod layout;
+pub mod notifications;
 pub mod panels;
 pub mod popups;
 pub mod ui;
-pub mod event;
-pub mod handlers;
