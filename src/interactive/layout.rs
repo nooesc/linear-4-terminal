@@ -75,3 +75,34 @@ pub fn centered_popup(width: u16, height: u16, area: Rect) -> Rect {
     let y = area.y + (area.height.saturating_sub(height)) / 2;
     Rect::new(x, y, width.min(area.width), height.min(area.height))
 }
+
+/// Left column split: teams, projects, issues
+pub struct LeftColumnLayout {
+    pub teams: Rect,
+    pub projects: Rect,
+    pub issues: Rect,
+}
+
+/// Split the left column into teams box, projects box, and issue list.
+/// Teams and projects get fixed height based on item count (max 5 rows + 2 for borders).
+/// Issues get the remaining space.
+pub fn left_column_layout(area: Rect, team_count: usize, project_count: usize) -> LeftColumnLayout {
+    // Each box needs item_count rows + 2 for borders, capped at 7 (5 visible + 2 borders)
+    let teams_height = ((team_count as u16) + 2).min(7).max(3);
+    let projects_height = ((project_count as u16) + 2).min(7).max(3);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(teams_height),
+            Constraint::Length(projects_height),
+            Constraint::Min(5),
+        ])
+        .split(area);
+
+    LeftColumnLayout {
+        teams: chunks[0],
+        projects: chunks[1],
+        issues: chunks[2],
+    }
+}
