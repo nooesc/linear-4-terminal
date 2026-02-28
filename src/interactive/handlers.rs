@@ -649,7 +649,9 @@ async fn handle_confirm(app: &mut InteractiveApp) {
         }
         Some(Popup::TextInput(TextInputContext::Filter)) => {
             app.filter_query = app.text_input.clone();
-            // TODO: apply filter parser
+            app.apply_filters();
+            app.selected_index = 0;
+            app.detail_scroll = 0;
             app.popup = None;
         }
         Some(Popup::TextInput(TextInputContext::EditTitle)) => {

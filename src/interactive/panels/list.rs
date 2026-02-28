@@ -439,15 +439,47 @@ pub fn draw_list(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
 
     let header_item = ListItem::new(header).style(header_style);
 
-    // Build issue rows
+    // Viewport scrolling: 1 row for header, rest for issues
+    let inner_height = area.height.saturating_sub(2) as usize; // -2 for borders
+    let visible_issues = inner_height.saturating_sub(1); // -1 for header row
+    let scroll_offset = if visible_issues > 0 && app.selected_index >= visible_issues {
+        app.selected_index - visible_issues + 1
+    } else {
+        0
+    };
+
+    // Build visible issue rows
     let items: Vec<ListItem> = std::iter::once(header_item)
         .chain(
             app.filtered_issues
                 .iter()
                 .enumerate()
+                .skip(scroll_offset)
+                .take(visible_issues)
                 .map(|(i, issue)| build_row(i, issue, app, &col_widths)),
         )
         .collect();
+
+    // Build title with scroll position and active filter
+    let total = app.filtered_issues.len();
+    let mut title = if scroll_offset > 0 || total > visible_issues {
+        format!(
+            " Issues [{}-{}/{}]",
+            scroll_offset + 1,
+            (scroll_offset + visible_issues).min(total),
+            total
+        )
+    } else {
+        format!(" Issues ({})", total)
+    };
+    if !app.filter_query.is_empty() {
+        title.push_str(&format!(" [filter: {}]", app.filter_query));
+    }
+    if !app.search_query.is_empty() {
+        title.push_str(&format!(" [search: {}]", app.search_query));
+    }
+    title.push(' ');
+    let block = block.title(title);
 
     let list = List::new(items)
         .block(block)

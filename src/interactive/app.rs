@@ -323,12 +323,29 @@ impl InteractiveApp {
     pub fn apply_filters(&mut self) {
         self.filtered_issues = self.issues.clone();
 
-        // Apply search filter
+        // Apply search filter (title/identifier)
         if !self.search_query.is_empty() {
             let query = self.search_query.to_lowercase();
             self.filtered_issues.retain(|issue| {
                 issue.title.to_lowercase().contains(&query)
                     || issue.identifier.to_lowercase().contains(&query)
+            });
+        }
+
+        // Apply advanced filter (searches all visible fields)
+        if !self.filter_query.is_empty() {
+            let query = self.filter_query.to_lowercase();
+            self.filtered_issues.retain(|issue| {
+                issue.title.to_lowercase().contains(&query)
+                    || issue.identifier.to_lowercase().contains(&query)
+                    || issue.state.name.to_lowercase().contains(&query)
+                    || issue.project.as_ref().map_or(false, |p| p.name.to_lowercase().contains(&query))
+                    || issue.assignee.as_ref().map_or(false, |a| {
+                        a.name.to_lowercase().contains(&query)
+                            || a.email.to_lowercase().contains(&query)
+                    })
+                    || issue.labels.nodes.iter().any(|l| l.name.to_lowercase().contains(&query))
+                    || issue.description.as_ref().map_or(false, |d| d.to_lowercase().contains(&query))
             });
         }
 
