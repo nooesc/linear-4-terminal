@@ -41,5 +41,17 @@ homebrew-formula.rb
 RELEASE.md
 homebrew-setup.md
 
+# Internal dev docs
+CLAUDE.md
+for-claude.md
+docs/
+examples/
+tests/
+DEBUG_GUIDE.md
+FILTER_GUIDE.md
+REFACTORING_GUIDE.md
+REFACTORING_SUMMARY.md
+test_*.sh
+
 # Logs directory
 logs/
