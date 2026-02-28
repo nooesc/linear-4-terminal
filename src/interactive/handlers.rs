@@ -92,15 +92,51 @@ async fn handle_action(app: &mut InteractiveApp, action: Action) {
     match action {
         // Navigation
         Action::MoveUp => {
-            if app.selected_index > 0 {
-                app.selected_index -= 1;
-                app.detail_scroll = 0;
+            match app.focus {
+                Focus::TeamList => {
+                    if app.team_index > 0 {
+                        app.team_index -= 1;
+                    }
+                }
+                Focus::ProjectList => {
+                    if app.project_index > 0 {
+                        app.project_index -= 1;
+                    }
+                }
+                Focus::IssueList => {
+                    if app.selected_index > 0 {
+                        app.selected_index -= 1;
+                        app.detail_scroll = 0;
+                    }
+                }
+                Focus::DetailPanel => {
+                    app.detail_scroll = app.detail_scroll.saturating_sub(1);
+                }
             }
         }
         Action::MoveDown => {
-            if app.selected_index < app.filtered_issues.len().saturating_sub(1) {
-                app.selected_index += 1;
-                app.detail_scroll = 0;
+            match app.focus {
+                Focus::TeamList => {
+                    if app.team_index < app.teams.len().saturating_sub(1) {
+                        app.team_index += 1;
+                    }
+                }
+                Focus::ProjectList => {
+                    // +1 for "All" entry
+                    let max = app.available_projects.len(); // 0="All", so max index = len
+                    if app.project_index < max {
+                        app.project_index += 1;
+                    }
+                }
+                Focus::IssueList => {
+                    if app.selected_index < app.filtered_issues.len().saturating_sub(1) {
+                        app.selected_index += 1;
+                        app.detail_scroll = 0;
+                    }
+                }
+                Focus::DetailPanel => {
+                    app.detail_scroll += 1;
+                }
             }
         }
         Action::ScrollUp => {
@@ -113,12 +149,20 @@ async fn handle_action(app: &mut InteractiveApp, action: Action) {
         // Focus
         Action::SwitchPanel => {
             app.focus = match app.focus {
+                Focus::TeamList => Focus::ProjectList,
+                Focus::ProjectList => Focus::IssueList,
                 Focus::IssueList => Focus::DetailPanel,
-                Focus::DetailPanel => Focus::IssueList,
+                Focus::DetailPanel => Focus::TeamList,
             };
         }
         Action::FocusList => {
-            app.focus = Focus::IssueList;
+            // Shift-Tab: go backwards in focus cycle
+            app.focus = match app.focus {
+                Focus::TeamList => Focus::DetailPanel,
+                Focus::ProjectList => Focus::TeamList,
+                Focus::IssueList => Focus::ProjectList,
+                Focus::DetailPanel => Focus::IssueList,
+            };
         }
 
         // Popups
@@ -282,6 +326,69 @@ async fn handle_action(app: &mut InteractiveApp, action: Action) {
                 .find(|n| n.kind == NotificationKind::Error && !n.dismissed)
             {
                 n.dismissed = true;
+            }
+        }
+        Action::SelectTeam => {
+            if app.team_index < app.teams.len() {
+                let was_same = app.active_team == Some(app.team_index);
+                if was_same {
+                    // Deselect: show all teams
+                    app.active_team = None;
+                } else {
+                    app.active_team = Some(app.team_index);
+                }
+                // Reset project selection
+                app.active_project = None;
+                app.project_index = 0;
+                // Re-fetch issues
+                let team_name = app
+                    .teams
+                    .get(app.team_index)
+                    .map(|t| t.name.clone())
+                    .unwrap_or_default();
+                let msg = if was_same {
+                    "Showing all teams".to_string()
+                } else {
+                    format!("Filtering by team: {}", team_name)
+                };
+                let nid = app.notify(NotificationKind::Loading, msg.clone());
+                match app.refresh_issues().await {
+                    Ok(_) => app.replace_notification(nid, NotificationKind::Success, msg),
+                    Err(e) => app.replace_notification(
+                        nid,
+                        NotificationKind::Error,
+                        format!("Failed: {}", e),
+                    ),
+                }
+            }
+        }
+        Action::SelectProject => {
+            let max_idx = app.available_projects.len(); // 0=All, 1..=len=projects
+            if app.project_index <= max_idx {
+                if app.project_index == 0 {
+                    app.active_project = None; // "All"
+                } else {
+                    app.active_project = Some(app.project_index);
+                }
+                let msg = if app.project_index == 0 {
+                    "Showing all projects".to_string()
+                } else {
+                    let name = app
+                        .available_projects
+                        .get(app.project_index - 1)
+                        .map(|p| p.name.clone())
+                        .unwrap_or_default();
+                    format!("Filtering by project: {}", name)
+                };
+                let nid = app.notify(NotificationKind::Loading, msg.clone());
+                match app.refresh_issues().await {
+                    Ok(_) => app.replace_notification(nid, NotificationKind::Success, msg),
+                    Err(e) => app.replace_notification(
+                        nid,
+                        NotificationKind::Error,
+                        format!("Failed: {}", e),
+                    ),
+                }
             }
         }
         Action::ExternalEditor => {
