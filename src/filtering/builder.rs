@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use chrono::{Duration, Utc};
 use serde_json::{json, Value};
 
@@ -95,7 +97,7 @@ pub enum FilterValue {
 }
 
 /// Logical operators for combining filters
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LogicalOperator {
     And,
     Or,
@@ -132,6 +134,15 @@ impl FilterBuilder {
             current_operator: LogicalOperator::And,
         }
     }
+
+    /// Create a filter builder from a pre-built expression tree.
+    pub(crate) fn from_expression(root: FilterExpression) -> Self {
+        Self {
+            root: Some(root),
+            current_group: Vec::new(),
+            current_operator: LogicalOperator::And,
+        }
+    }
     
     /// Add a condition to the current group
     fn add_condition(&mut self, condition: FilterCondition) -> &mut Self {
@@ -140,7 +151,7 @@ impl FilterBuilder {
     }
     
     /// Start building a field filter
-    pub fn field(&mut self, field: FilterField) -> FieldBuilder {
+    pub fn field(&mut self, field: FilterField) -> FieldBuilder<'_> {
         FieldBuilder {
             builder: self,
             field,
@@ -148,39 +159,39 @@ impl FilterBuilder {
     }
     
     // Convenience methods for common fields
-    pub fn title(&mut self) -> FieldBuilder {
+    pub fn title(&mut self) -> FieldBuilder<'_> {
         self.field(FilterField::Title)
     }
     
-    pub fn description(&mut self) -> FieldBuilder {
+    pub fn description(&mut self) -> FieldBuilder<'_> {
         self.field(FilterField::Description)
     }
     
-    pub fn status(&mut self) -> FieldBuilder {
+    pub fn status(&mut self) -> FieldBuilder<'_> {
         self.field(FilterField::Status)
     }
     
-    pub fn priority(&mut self) -> FieldBuilder {
+    pub fn priority(&mut self) -> FieldBuilder<'_> {
         self.field(FilterField::Priority)
     }
     
-    pub fn assignee(&mut self) -> FieldBuilder {
+    pub fn assignee(&mut self) -> FieldBuilder<'_> {
         self.field(FilterField::Assignee)
     }
     
-    pub fn label(&mut self) -> FieldBuilder {
+    pub fn label(&mut self) -> FieldBuilder<'_> {
         self.field(FilterField::Label)
     }
     
-    pub fn project(&mut self) -> FieldBuilder {
+    pub fn project(&mut self) -> FieldBuilder<'_> {
         self.field(FilterField::Project)
     }
     
-    pub fn created_at(&mut self) -> FieldBuilder {
+    pub fn created_at(&mut self) -> FieldBuilder<'_> {
         self.field(FilterField::CreatedAt)
     }
     
-    pub fn updated_at(&mut self) -> FieldBuilder {
+    pub fn updated_at(&mut self) -> FieldBuilder<'_> {
         self.field(FilterField::UpdatedAt)
     }
     
@@ -524,6 +535,12 @@ fn condition_to_graphql(condition: &FilterCondition) -> Value {
         }
         (FilterField::Label, FilterOperator::HasNone, FilterValue::StringList(list)) => {
             json!({ field_name: { "none": { "name": { "in": list } } } })
+        }
+        (FilterField::Label, FilterOperator::IsNull, _) => {
+            json!({ field_name: { "every": { "id": { "null": true } } } })
+        }
+        (FilterField::Label, FilterOperator::IsNotNull, _) => {
+            json!({ field_name: { "some": { "id": { "null": false } } } })
         }
         (FilterField::Label, FilterOperator::Equals, FilterValue::String(s)) => {
             json!({ field_name: { "some": { "name": { "eq": s } } } })

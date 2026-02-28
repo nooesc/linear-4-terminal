@@ -23,12 +23,17 @@ impl EventHandler {
             loop {
                 match event::poll(Duration::from_millis(tick_rate)) {
                     Ok(true) => {
-                        if let Ok(CrosstermEvent::Key(key)) = event::read() {
-                            if key.kind == KeyEventKind::Press {
+                        match event::read() {
+                            Ok(CrosstermEvent::Key(key)) if key.kind == KeyEventKind::Press => {
                                 if sender_clone.send(Event::Key(key)).is_err() {
                                     break;
                                 }
                             }
+                            Ok(CrosstermEvent::Resize(_, _)) => {
+                                // Terminal resized — send a tick to trigger redraw
+                                // (event already consumed, next draw will use new size)
+                            }
+                            _ => {}
                         }
                     }
                     Ok(false) => {}

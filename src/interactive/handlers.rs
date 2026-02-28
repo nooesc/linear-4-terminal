@@ -88,8 +88,39 @@ pub async fn run_interactive_mode() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        // Draw UI
-        terminal.draw(|f| super::ui::draw(f, &app))?;
+        // Sync panel mode with terminal size on resize:
+        // If we're in two-panel mode, detail fullscreen should be off.
+        // If we just resized from wide→narrow while focus was on DetailPanel,
+        // enable detail fullscreen so the user can still see the detail.
+        let term_size = terminal.size().unwrap_or_default();
+        let is_two_panel = term_size.width >= 100;
+        if is_two_panel {
+            app.show_detail_fullscreen = false;
+        } else if app.focus == Focus::DetailPanel && !app.show_detail_fullscreen {
+            // Resized from wide to narrow while viewing detail — preserve the view
+            app.show_detail_fullscreen = true;
+        }
+
+        // Draw UI — tolerate IO errors from terminal resize
+        let draw_result = terminal.draw(|f| {
+            // Catch panics inside rendering so resize doesn't kill the app
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                super::ui::draw(f, &app);
+            }));
+            if let Err(panic_payload) = result {
+                let msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "unknown panic".to_string()
+                };
+                crate::logging::log_error(&format!("Draw panic (skipping frame): {}", msg));
+            }
+        });
+        if draw_result.is_err() {
+            continue; // IO error from resize, skip frame
+        }
 
         // Handle events — drain all queued events to avoid lag
         let first = events.recv()?;
@@ -310,17 +341,29 @@ async fn handle_action(app: &mut InteractiveApp, action: Action) {
             app.focus = match app.focus {
                 Focus::TeamList => Focus::ProjectList,
                 Focus::ProjectList => Focus::IssueList,
-                Focus::IssueList => Focus::DetailPanel,
-                Focus::DetailPanel => Focus::TeamList,
+                Focus::IssueList => {
+                    app.show_detail_fullscreen = true;
+                    Focus::DetailPanel
+                }
+                Focus::DetailPanel => {
+                    app.show_detail_fullscreen = false;
+                    Focus::TeamList
+                }
             };
         }
         Action::FocusList => {
-            // Shift-Tab: go backwards in focus cycle
+            // Shift-Tab / Left / Esc: go backwards in focus cycle
             app.focus = match app.focus {
-                Focus::TeamList => Focus::DetailPanel,
+                Focus::TeamList => {
+                    app.show_detail_fullscreen = true;
+                    Focus::DetailPanel
+                }
                 Focus::ProjectList => Focus::TeamList,
                 Focus::IssueList => Focus::ProjectList,
-                Focus::DetailPanel => Focus::IssueList,
+                Focus::DetailPanel => {
+                    app.show_detail_fullscreen = false;
+                    Focus::IssueList
+                }
             };
         }
 

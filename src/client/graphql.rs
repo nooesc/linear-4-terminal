@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::error::{LinearError, LinearResult};
 use crate::graphql_fields::FieldSelection;
 use reqwest::Client;

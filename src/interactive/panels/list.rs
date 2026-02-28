@@ -37,147 +37,54 @@ pub struct ColumnWidths {
 pub fn calculate_column_widths(available_width: u16) -> ColumnWidths {
     let width = available_width as usize;
 
-    // Minimum widths
-    const MIN_ID: usize = 7;
-    const MIN_TITLE: usize = 10;
-    const MIN_PROJECT: usize = 8;
-    const MIN_LABELS: usize = 10;
-    const MIN_STATUS: usize = 8;
-    const MIN_LINKS: usize = 3;
-    const MIN_AGE: usize = 5;
+    // Title-first approach: fixed columns take what they need, title gets the rest.
+    // Columns are progressively added as width allows.
+    let id_w = 7;
+    let pri_w = 3; // symbol + 2 padding
+    let status_w = 10;
+    let age_w = 5;
 
-    // Fixed widths
-    let priority_width = 3; // 2 + space
+    // Always-on columns cost (with 1-char separators between each)
+    let fixed_cost = id_w + pri_w + status_w + age_w;
 
-    if width < 80 {
-        // Ultra narrow - only essentials
-        ColumnWidths {
-            id: MIN_ID,
-            priority: priority_width,
-            title: width
-                .saturating_sub(MIN_ID + priority_width + MIN_STATUS + MIN_AGE + 5)
-                .min(20),
-            project: 0,
-            labels: 0,
-            status: MIN_STATUS,
-            assignee: 0,
-            links: 0,
-            age: MIN_AGE,
-            show_project: false,
-            show_labels: false,
-            show_assignee: false,
-            show_links: false,
-            show_age: true,
-        }
-    } else if width < 100 {
-        // Narrow - add project
-        let essential_width = MIN_ID + priority_width + MIN_STATUS + MIN_PROJECT + MIN_AGE + 6;
-        ColumnWidths {
-            id: MIN_ID,
-            priority: priority_width,
-            title: width.saturating_sub(essential_width).max(MIN_TITLE).min(25),
-            project: MIN_PROJECT,
-            labels: 0,
-            status: MIN_STATUS,
-            assignee: 0,
-            links: 0,
-            age: MIN_AGE,
-            show_project: true,
-            show_labels: false,
-            show_assignee: false,
-            show_links: false,
-            show_age: true,
-        }
-    } else if width < 120 {
-        // Medium - add labels
-        let fixed_width = 8 + priority_width + MIN_PROJECT + MIN_LABELS + 10 + MIN_AGE + 7;
-        let remaining = width.saturating_sub(fixed_width);
-        let title_width = remaining.min(35).max(MIN_TITLE);
+    // Optional column sizes
+    let project_w = 10;
+    let labels_w = 12;
+    let assignee_w = 10;
+    let links_w = 3;
 
-        ColumnWidths {
-            id: 8,
-            priority: priority_width,
-            title: title_width,
-            project: MIN_PROJECT,
-            labels: MIN_LABELS,
-            status: 10,
-            assignee: 0,
-            links: 0,
-            age: MIN_AGE,
-            show_project: true,
-            show_labels: true,
-            show_assignee: false,
-            show_links: false,
-            show_age: true,
-        }
-    } else if width < 150 {
-        // Wide - add assignee
-        let fixed_width = 9 + priority_width + 12 + 15 + 12 + 12 + 6 + 8;
-        let remaining = width.saturating_sub(fixed_width);
-        let title_width = remaining.min(40).max(20);
+    // Determine which optional columns fit. We need at least 15 chars for title.
+    let mut used = fixed_cost;
+    let show_project = width.saturating_sub(used + project_w) >= 15;
+    if show_project { used += project_w; }
 
-        ColumnWidths {
-            id: 9,
-            priority: priority_width,
-            title: title_width,
-            project: 12,
-            labels: 15,
-            status: 12,
-            assignee: 12,
-            links: 0,
-            age: 6,
-            show_project: true,
-            show_labels: true,
-            show_assignee: true,
-            show_links: false,
-            show_age: true,
-        }
-    } else if width < 180 {
-        // Extra wide - add links
-        let essential_width = MIN_ID + priority_width + 12 + 15 + 15 + 15 + MIN_LINKS + 6 + 9;
-        ColumnWidths {
-            id: 10,
-            priority: priority_width,
-            title: width.saturating_sub(essential_width).max(20).min(40),
-            project: 12,
-            labels: 15,
-            status: 15,
-            assignee: 15,
-            links: MIN_LINKS,
-            age: 6,
-            show_project: true,
-            show_labels: true,
-            show_assignee: true,
-            show_links: true,
-            show_age: true,
-        }
-    } else {
-        // Ultra wide - proportional distribution
-        let fixed_columns = 10 + priority_width + 4 + 6 + 11;
-        let available = width.saturating_sub(fixed_columns);
-        let project_width = (available as f32 * 0.15) as usize;
-        let labels_width = (available as f32 * 0.20) as usize;
-        let status_width = (available as f32 * 0.15) as usize;
-        let assignee_width = (available as f32 * 0.15) as usize;
-        let title_width =
-            available.saturating_sub(project_width + labels_width + status_width + assignee_width);
+    let show_labels = width >= 120 && width.saturating_sub(used + labels_w) >= 20;
+    if show_labels { used += labels_w; }
 
-        ColumnWidths {
-            id: 10,
-            priority: priority_width,
-            title: title_width.max(30),
-            project: project_width.max(12),
-            labels: labels_width.max(15),
-            status: status_width.max(12),
-            assignee: assignee_width.max(12),
-            links: 4,
-            age: 6,
-            show_project: true,
-            show_labels: true,
-            show_assignee: true,
-            show_links: true,
-            show_age: true,
-        }
+    let show_assignee = width >= 140 && width.saturating_sub(used + assignee_w) >= 25;
+    if show_assignee { used += assignee_w; }
+
+    let show_links = width >= 170 && width.saturating_sub(used + links_w) >= 30;
+    if show_links { used += links_w; }
+
+    // Title gets ALL remaining space — no cap
+    let title_w = width.saturating_sub(used).max(10);
+
+    ColumnWidths {
+        id: id_w,
+        priority: pri_w,
+        title: title_w,
+        project: if show_project { project_w } else { 0 },
+        labels: if show_labels { labels_w } else { 0 },
+        status: status_w,
+        assignee: if show_assignee { assignee_w } else { 0 },
+        links: if show_links { links_w } else { 0 },
+        age: age_w,
+        show_project,
+        show_labels,
+        show_assignee,
+        show_links,
+        show_age: true,
     }
 }
 
@@ -387,54 +294,28 @@ pub fn draw_list(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
         .fg(Color::Gray)
         .add_modifier(Modifier::UNDERLINED);
     let mut header = format!(
-        "{:<width$} {:<2}",
-        "ID",
-        "P",
-        width = col_widths.id
+        "{:<id_w$}{:<pri_w$}{:<title_w$}",
+        "ID", "P", "Title",
+        id_w = col_widths.id,
+        pri_w = col_widths.priority,
+        title_w = col_widths.title,
     );
-    header.push_str(&format!(
-        " {:<width$}",
-        "Title",
-        width = col_widths.title
-    ));
 
     if col_widths.show_project {
-        header.push_str(&format!(
-            " {:<width$}",
-            "Project",
-            width = col_widths.project
-        ));
+        header.push_str(&format!("{:<w$}", "Project", w = col_widths.project));
     }
     if col_widths.show_labels {
-        header.push_str(&format!(
-            " {:<width$}",
-            "Labels",
-            width = col_widths.labels
-        ));
+        header.push_str(&format!("{:<w$}", "Labels", w = col_widths.labels));
     }
-
-    header.push_str(&format!(
-        " {:<width$}",
-        "Status",
-        width = col_widths.status
-    ));
-
+    header.push_str(&format!("{:<w$}", "Status", w = col_widths.status));
     if col_widths.show_assignee {
-        header.push_str(&format!(
-            " {:<width$}",
-            "Assignee",
-            width = col_widths.assignee
-        ));
+        header.push_str(&format!("{:<w$}", "Assignee", w = col_widths.assignee));
     }
     if col_widths.show_links {
-        header.push_str(" \u{1f517}"); // 🔗
+        header.push_str(&format!("{:<w$}", "\u{1f517}", w = col_widths.links));
     }
     if col_widths.show_age {
-        header.push_str(&format!(
-            " {:<width$}",
-            "Age",
-            width = col_widths.age
-        ));
+        header.push_str(&format!("{:<w$}", "Age", w = col_widths.age));
     }
 
     let header_item = ListItem::new(header).style(header_style);
@@ -536,7 +417,7 @@ fn build_row<'a>(
     let id_span = Span::styled(id_text, Style::default());
 
     let priority_span = Span::styled(
-        format!(" {} ", priority_symbol),
+        format!("{} ", priority_symbol),
         Style::default().fg(priority_color),
     );
 
@@ -558,7 +439,7 @@ fn build_row<'a>(
     };
     let status_span = Span::styled(
         format!(
-            " {:<width$}",
+            "{:<width$}",
             truncate(&issue.state.name, col_widths.status),
             width = col_widths.status
         ),
@@ -577,7 +458,7 @@ fn build_row<'a>(
             .unwrap_or("-");
         let project_span = Span::styled(
             format!(
-                " {:<width$}",
+                "{:<width$}",
                 truncate(project_name, col_widths.project),
                 width = col_widths.project
             ),
@@ -602,7 +483,7 @@ fn build_row<'a>(
         };
         let labels_span = Span::styled(
             format!(
-                " {:<width$}",
+                "{:<width$}",
                 truncate(&labels_text, col_widths.labels),
                 width = col_widths.labels
             ),
@@ -617,7 +498,7 @@ fn build_row<'a>(
     if col_widths.show_assignee {
         let assignee_span = Span::styled(
             format!(
-                " {:<width$}",
+                "{:<width$}",
                 truncate(&assignee_name, col_widths.assignee),
                 width = col_widths.assignee
             ),
@@ -631,9 +512,9 @@ fn build_row<'a>(
         let links = get_issue_links(issue);
         let extra_links_count = if links.len() > 1 { links.len() - 1 } else { 0 };
         let links_text = if extra_links_count > 0 {
-            format!(" {} ", extra_links_count)
+            format!("{} ", extra_links_count)
         } else {
-            "   ".to_string()
+            "  ".to_string()
         };
         let links_span = Span::styled(links_text, Style::default().fg(Color::Blue));
         spans.push(links_span);
@@ -643,7 +524,7 @@ fn build_row<'a>(
     if col_widths.show_age {
         let age_text = format_age(&issue.created_at);
         let age_span = Span::styled(
-            format!(" {:<width$}", age_text, width = col_widths.age),
+            format!("{:<width$}", age_text, width = col_widths.age),
             Style::default().fg(Color::Gray),
         );
         spans.push(age_span);

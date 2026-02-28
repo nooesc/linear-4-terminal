@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use serde_json::Value;
 
 use super::builder::FilterBuilder;
@@ -17,7 +19,7 @@ impl FilterAdapter {
                 builder.to_graphql()
                     .map_err(|e| format!("Filter build error: {}", e))
             }
-            Err(e) => {
+            Err(_e) => {
                 // Fall back to legacy parser for backward compatibility
                 
                 let filters = legacy_parse(query)?;

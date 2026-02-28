@@ -66,6 +66,7 @@ pub enum Action {
     // General
     Help,
     Quit,
+    #[allow(dead_code)]
     DismissNotification,
     ExternalEditor,
 
@@ -134,7 +135,7 @@ fn map_list_key(key: KeyEvent) -> Action {
         KeyCode::Char('q') | KeyCode::Esc => Action::Quit,
         KeyCode::Char('j') | KeyCode::Down => Action::MoveDown,
         KeyCode::Char('k') | KeyCode::Up => Action::MoveUp,
-        KeyCode::Tab | KeyCode::Enter => Action::SwitchPanel,
+        KeyCode::Tab | KeyCode::Enter | KeyCode::Right => Action::SwitchPanel,
         KeyCode::Char('s') => Action::ChangeStatus,
         KeyCode::Char('c') => Action::AddComment,
         KeyCode::Char('l') => Action::ChangeLabels,
@@ -160,7 +161,7 @@ fn map_detail_key(key: KeyEvent) -> Action {
     if is_shift_nav_down(&key) { return Action::MoveDownFast; }
     if is_shift_nav_up(&key) { return Action::MoveUpFast; }
     match key.code {
-        KeyCode::Char('q') | KeyCode::Esc => Action::FocusList,
+        KeyCode::Char('q') | KeyCode::Esc | KeyCode::Left => Action::FocusList,
         KeyCode::Char('j') | KeyCode::Down => Action::ScrollDown,
         KeyCode::Char('k') | KeyCode::Up => Action::ScrollUp,
         KeyCode::Tab => Action::SwitchPanel,

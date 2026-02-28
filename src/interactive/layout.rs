@@ -14,7 +14,7 @@ pub struct PanelLayout {
     pub right: Rect,
 }
 
-/// Calculate the top-level layout
+/// Calculate the top-level layout — compact: 1-row header, 1-row footer
 pub fn app_layout(area: Rect, notification_count: usize) -> AppLayout {
     let notif_height = if notification_count > 0 {
         (notification_count as u16).min(3) + 2
@@ -25,10 +25,10 @@ pub fn app_layout(area: Rect, notification_count: usize) -> AppLayout {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
-            Constraint::Min(10),
+            Constraint::Length(1),  // header: single line, no borders
+            Constraint::Min(10),   // main content
             Constraint::Length(notif_height),
-            Constraint::Length(3),
+            Constraint::Length(1),  // footer: single line, no borders
         ])
         .split(area);
 
@@ -52,8 +52,8 @@ pub fn panel_layout(area: Rect) -> PanelLayout {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(40),
-                Constraint::Percentage(60),
+                Constraint::Percentage(45),
+                Constraint::Percentage(55),
             ])
             .split(area);
 
@@ -62,11 +62,6 @@ pub fn panel_layout(area: Rect) -> PanelLayout {
             right: chunks[1],
         }
     }
-}
-
-/// Whether we're in single-panel mode (narrow terminal)
-pub fn is_single_panel(area: Rect) -> bool {
-    area.width < 100
 }
 
 /// Center a popup of given width/height in the area

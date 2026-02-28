@@ -1,7 +1,8 @@
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Paragraph},
+    text::{Line, Span},
+    widgets::Paragraph,
     Frame,
 };
 
@@ -9,67 +10,61 @@ use super::list::truncate;
 use crate::interactive::app::{GroupBy, InteractiveApp};
 
 pub fn draw_header(frame: &mut Frame, area: Rect, app: &InteractiveApp) {
-    let header_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(75), Constraint::Percentage(25)])
-        .split(area);
+    let width = area.width as usize;
 
-    // Left side: selected issue identifier + title, or fallback
-    let title = if let Some(issue) = app.get_selected_issue() {
-        let max_title_len = (header_chunks[0].width as usize)
-            .saturating_sub(issue.identifier.len() + 6);
-        format!(
-            " {} - {} ",
-            issue.identifier,
-            truncate(&issue.title, max_title_len)
-        )
+    // Left: selected issue info
+    let left = if let Some(issue) = app.get_selected_issue() {
+        let max_len = width / 2;
+        let title = truncate(&issue.title, max_len.saturating_sub(issue.identifier.len() + 3));
+        vec![
+            Span::styled(
+                format!(" {} ", issue.identifier),
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(title, Style::default().fg(Color::White)),
+        ]
     } else {
-        " Linear CLI ".to_string()
+        vec![Span::styled(
+            " Linear CLI",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )]
     };
 
-    let header = Paragraph::new(title)
-        .style(
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray)),
-        );
-    frame.render_widget(header, header_chunks[0]);
+    // Right: status indicators
+    let mut right_parts = Vec::new();
 
-    // Right side: issue count, group-by mode, hide-done, active filter
-    let done_text = if app.hide_done_issues {
-        " | Done: Hidden"
-    } else {
-        ""
+    let group_label = match app.group_by {
+        GroupBy::Status => "status",
+        GroupBy::Project => "project",
     };
+    right_parts.push(Span::styled(
+        format!("group:{}", group_label),
+        Style::default().fg(Color::DarkGray),
+    ));
 
-    let filter_text = if !app.filter_query.is_empty() {
-        format!(" | Filter: {}", truncate(&app.filter_query, 15))
-    } else {
-        String::new()
-    };
+    if app.hide_done_issues {
+        right_parts.push(Span::styled(" hide:done", Style::default().fg(Color::DarkGray)));
+    }
 
-    let info = format!(
-        " Issues: {} | Group: {}{}{}",
-        app.filtered_issues.len(),
-        match app.group_by {
-            GroupBy::Status => "Status",
-            GroupBy::Project => "Project",
-        },
-        done_text,
-        filter_text,
-    );
+    if !app.filter_query.is_empty() {
+        right_parts.push(Span::styled(
+            format!(" filter:{}", truncate(&app.filter_query, 12)),
+            Style::default().fg(Color::Yellow),
+        ));
+    }
 
-    let info_widget = Paragraph::new(info)
-        .style(Style::default().fg(Color::Yellow))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray)),
-        );
-    frame.render_widget(info_widget, header_chunks[1]);
+    right_parts.push(Span::raw(" "));
+
+    // Calculate right side width to pad correctly
+    let right_text_len: usize = right_parts.iter().map(|s| s.content.len()).sum();
+    let left_text_len: usize = left.iter().map(|s| s.content.len()).sum();
+    let pad = width.saturating_sub(left_text_len + right_text_len);
+
+    let mut spans = left;
+    spans.push(Span::raw(" ".repeat(pad)));
+    spans.extend(right_parts);
+
+    let header = Paragraph::new(Line::from(spans))
+        .style(Style::default().bg(Color::Rgb(20, 22, 30)));
+    frame.render_widget(header, area);
 }

@@ -37,6 +37,7 @@ pub fn log_debug(message: &str) {
     log_with_level("DEBUG", message);
 }
 
+#[allow(deprecated)]
 pub fn log_panic_info(info: &std::panic::PanicInfo) {
     let mut message = String::from("PANIC: ");
     

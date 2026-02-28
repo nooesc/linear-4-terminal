@@ -21,6 +21,7 @@ pub enum Focus {
 }
 
 /// Active popup overlay (None = no popup)
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Popup {
     StatusPicker,
@@ -46,6 +47,7 @@ pub enum TextInputContext {
 }
 
 /// What a confirmation dialog will do if confirmed
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConfirmAction {
     ArchiveIssue(String),
@@ -58,6 +60,7 @@ pub enum GroupBy {
 }
 
 /// Section within the detail panel
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DetailSection {
     Info,
@@ -90,6 +93,7 @@ pub struct Notification {
     pub dismissed: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum NotificationKind {
     Success,
@@ -102,10 +106,12 @@ pub enum NotificationKind {
 // InteractiveApp
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 pub struct InteractiveApp {
     // Layout
     pub focus: Focus,
     pub popup: Option<Popup>,
+    pub show_detail_fullscreen: bool, // single-panel mode: show detail full-width
 
     // Team & project selectors
     pub teams: Vec<crate::models::Team>,
@@ -175,6 +181,7 @@ impl InteractiveApp {
             // Layout
             focus: Focus::IssueList,
             popup: None,
+            show_detail_fullscreen: false,
 
             // Team & project selectors
             teams: Vec::new(),
@@ -433,6 +440,7 @@ impl InteractiveApp {
         self.filtered_issues.get(self.selected_index)
     }
 
+    #[allow(dead_code)]
     pub fn get_issue_by_id(&self, id: &str) -> Option<&Issue> {
         self.issues.iter().find(|i| i.id == id)
     }
@@ -481,6 +489,7 @@ impl InteractiveApp {
         id
     }
 
+    #[allow(dead_code)]
     pub fn dismiss_notification(&mut self, id: u64) {
         if let Some(n) = self.notifications.iter_mut().find(|n| n.id == id) {
             n.dismissed = true;
