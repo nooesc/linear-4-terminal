@@ -130,6 +130,7 @@ pub struct InteractiveApp {
     // Picker state
     pub picker_index: usize,
     pub picker_search: String,
+    pub selected_labels: HashSet<String>,
 
     // Create issue form
     pub create_form: CreateIssueForm,
@@ -190,6 +191,7 @@ impl InteractiveApp {
             // Picker
             picker_index: 0,
             picker_search: String::new(),
+            selected_labels: HashSet::new(),
 
             // Create form
             create_form: CreateIssueForm::default(),
