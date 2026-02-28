@@ -17,13 +17,13 @@ curl -sSL https://raw.githubusercontent.com/colerafiz/linear-4-terminal/main/ins
 ### Install from source
 
 ```bash
-cargo install --git https://github.com/colerafiz/linear-4-terminal
+cargo install --git https://github.com/nooesc/linear-4-terminal
 ```
 
 Or:
 
 ```bash
-git clone https://github.com/colerafiz/linear-4-terminal
+git clone https://github.com/nooesc/linear-4-terminal
 cd linear-4-terminal
 cargo install --path .
 ```
@@ -142,13 +142,42 @@ linear
 linear interactive
 ```
 
-Shortcuts:
-- `j/k`, `↑/↓` navigate the list
-- `Enter` open issue details
-- `/` filter by text
-- `s` status, `c` comment, `l` labels, `p` project
-- `e` full edit mode, `r` refresh, `g` toggle grouping
-- `q` or `Esc` to quit
+### Layout
+
+Two-panel view with a left sidebar (teams, projects, issue list) and a right detail panel. On narrow terminals the panels stack — use Right/Left arrows to switch between list and detail views.
+
+### Navigation
+
+| Key | Action |
+|-----|--------|
+| `j/k`, `↑/↓` | Move up/down |
+| `Shift+J/K`, `Shift+↑/↓` | Jump 5 items |
+| `Tab` | Cycle focus: teams → projects → issues → detail |
+| `Shift+Tab` | Cycle focus backward |
+| `→` / `Enter` | Open issue detail (full-screen in narrow mode) |
+| `←` / `Esc` | Back to issue list (from detail) |
+
+### Actions
+
+| Key | Action |
+|-----|--------|
+| `s` | Change status |
+| `c` | Add comment |
+| `l` | Change labels |
+| `p` | Change project |
+| `a` | Change assignee |
+| `e` | Edit title |
+| `n` | Create new issue |
+| `/` | Search issues |
+| `f` | Filter issues (searches all fields) |
+| `o` | Open in browser |
+| `x` | Toggle multi-select |
+| `Space` | Bulk action on selected |
+| `d` | Toggle hide done issues |
+| `g` | Toggle grouping (status/project) |
+| `r` | Refresh |
+| `?` | Help |
+| `q` | Quit |
 
 ## Output formats
 
