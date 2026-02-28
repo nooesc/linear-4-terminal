@@ -160,8 +160,16 @@ fn collapse_nav_actions(actions: Vec<Action>) -> Vec<Action> {
                 nav_count += 1;
                 in_nav_run = true;
             }
+            Action::MoveDownFast => {
+                nav_count += 5;
+                in_nav_run = true;
+            }
             Action::MoveUp | Action::ScrollUp => {
                 nav_count -= 1;
+                in_nav_run = true;
+            }
+            Action::MoveUpFast => {
+                nav_count -= 5;
                 in_nav_run = true;
             }
             other => {
@@ -256,6 +264,45 @@ async fn handle_action(app: &mut InteractiveApp, action: Action) {
         }
         Action::ScrollDown => {
             app.detail_scroll += 1;
+        }
+        Action::MoveUpFast => {
+            match app.focus {
+                Focus::TeamList => {
+                    app.team_index = app.team_index.saturating_sub(5);
+                }
+                Focus::ProjectList => {
+                    app.project_index = app.project_index.saturating_sub(5);
+                }
+                Focus::IssueList => {
+                    app.selected_index = app.selected_index.saturating_sub(5);
+                    app.detail_scroll = 0;
+                }
+                Focus::DetailPanel => {
+                    app.detail_scroll = app.detail_scroll.saturating_sub(5);
+                }
+            }
+        }
+        Action::MoveDownFast => {
+            match app.focus {
+                Focus::TeamList => {
+                    if !app.teams.is_empty() {
+                        app.team_index = (app.team_index + 5).min(app.teams.len() - 1);
+                    }
+                }
+                Focus::ProjectList => {
+                    let max = app.available_projects.len();
+                    app.project_index = (app.project_index + 5).min(max);
+                }
+                Focus::IssueList => {
+                    if !app.filtered_issues.is_empty() {
+                        app.selected_index = (app.selected_index + 5).min(app.filtered_issues.len() - 1);
+                        app.detail_scroll = 0;
+                    }
+                }
+                Focus::DetailPanel => {
+                    app.detail_scroll += 5;
+                }
+            }
         }
 
         // Focus

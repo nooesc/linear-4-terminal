@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::interactive::app::{Focus, Popup, TextInputContext};
 
 #[derive(Debug, Clone, Copy)]
@@ -6,6 +6,8 @@ pub enum Action {
     // Navigation
     MoveUp,
     MoveDown,
+    MoveUpFast,   // Shift+nav: jump 5
+    MoveDownFast, // Shift+nav: jump 5
     ScrollUp,
     ScrollDown,
 
@@ -82,14 +84,27 @@ pub fn map_key(key: KeyEvent, focus: &Focus, popup: &Option<Popup>) -> Action {
     }
 }
 
+/// Check if Shift is held (for fast nav). Shift+j = 'J', Shift+arrow = SHIFT modifier.
+fn is_shift_nav_down(key: &KeyEvent) -> bool {
+    key.code == KeyCode::Char('J')
+        || (key.code == KeyCode::Down && key.modifiers.contains(KeyModifiers::SHIFT))
+}
+
+fn is_shift_nav_up(key: &KeyEvent) -> bool {
+    key.code == KeyCode::Char('K')
+        || (key.code == KeyCode::Up && key.modifiers.contains(KeyModifiers::SHIFT))
+}
+
 fn map_team_key(key: KeyEvent) -> Action {
+    if is_shift_nav_down(&key) { return Action::MoveDownFast; }
+    if is_shift_nav_up(&key) { return Action::MoveUpFast; }
     match key.code {
         KeyCode::Char('q') => Action::Quit,
         KeyCode::Char('j') | KeyCode::Down => Action::MoveDown,
         KeyCode::Char('k') | KeyCode::Up => Action::MoveUp,
         KeyCode::Enter => Action::SelectTeam,
         KeyCode::Tab => Action::SwitchPanel,
-        KeyCode::BackTab => Action::FocusList, // Shift-Tab wraps to detail (handled in handler)
+        KeyCode::BackTab => Action::FocusList,
         KeyCode::Char('?') => Action::Help,
         KeyCode::Char('r') => Action::Refresh,
         _ => Action::None,
@@ -97,13 +112,15 @@ fn map_team_key(key: KeyEvent) -> Action {
 }
 
 fn map_project_key(key: KeyEvent) -> Action {
+    if is_shift_nav_down(&key) { return Action::MoveDownFast; }
+    if is_shift_nav_up(&key) { return Action::MoveUpFast; }
     match key.code {
         KeyCode::Char('q') => Action::Quit,
         KeyCode::Char('j') | KeyCode::Down => Action::MoveDown,
         KeyCode::Char('k') | KeyCode::Up => Action::MoveUp,
         KeyCode::Enter => Action::SelectProject,
         KeyCode::Tab => Action::SwitchPanel,
-        KeyCode::BackTab => Action::FocusList, // Shift-Tab (handled in handler)
+        KeyCode::BackTab => Action::FocusList,
         KeyCode::Char('?') => Action::Help,
         KeyCode::Char('r') => Action::Refresh,
         _ => Action::None,
@@ -111,6 +128,8 @@ fn map_project_key(key: KeyEvent) -> Action {
 }
 
 fn map_list_key(key: KeyEvent) -> Action {
+    if is_shift_nav_down(&key) { return Action::MoveDownFast; }
+    if is_shift_nav_up(&key) { return Action::MoveUpFast; }
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc => Action::Quit,
         KeyCode::Char('j') | KeyCode::Down => Action::MoveDown,
@@ -138,6 +157,8 @@ fn map_list_key(key: KeyEvent) -> Action {
 }
 
 fn map_detail_key(key: KeyEvent) -> Action {
+    if is_shift_nav_down(&key) { return Action::MoveDownFast; }
+    if is_shift_nav_up(&key) { return Action::MoveUpFast; }
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc => Action::FocusList,
         KeyCode::Char('j') | KeyCode::Down => Action::ScrollDown,
