@@ -18,8 +18,15 @@ pub fn draw(frame: &mut Frame, app: &InteractiveApp) {
     // Header
     super::panels::header::draw_header(frame, app_layout.header, app);
 
-    // Left panel: issue list
-    super::panels::list::draw_list(frame, panels.left, app);
+    // Left column: teams, projects, issues
+    let left_col = layout::left_column_layout(
+        panels.left,
+        app.teams.len(),
+        app.available_projects.len() + 1, // +1 for "All"
+    );
+    super::panels::teams::draw_teams(frame, left_col.teams, app);
+    super::panels::projects::draw_projects(frame, left_col.projects, app);
+    super::panels::list::draw_list(frame, left_col.issues, app);
 
     // Right panel: detail (only in two-panel mode)
     if panels.right.width > 0 {
