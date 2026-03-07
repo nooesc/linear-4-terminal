@@ -84,7 +84,7 @@ pub async fn handle_run_search(matches: &ArgMatches) -> Result<(), Box<dyn std::
     
     // Parse and execute the search
     let api_key = get_api_key()?;
-    let client = LinearClient::new(api_key);
+    let client = LinearClient::new(api_key)?;
     
     let format = matches.get_one::<String>("format").map(|s| s.as_str()).unwrap_or("simple");
     let limit = matches.get_one::<String>("limit")
